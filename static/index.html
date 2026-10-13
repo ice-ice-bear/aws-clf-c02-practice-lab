@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cloud Practice · AWS CCP 학습</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="description" content="AWS Cloud Practitioner 문제 풀이와 개념 복습">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">☁</div><div><strong>Cloud Practice</strong><small>CLF-C02 STUDY DESK</small></div></div>
+      <nav aria-label="학습 메뉴">
+        <button class="nav active" data-view="practice">◉ <span>문제 풀기</span></button>
+        <button class="nav" data-view="review">▤ <span>취약 개념</span></button>
+        <button class="nav" data-view="guide">◈ <span>학습 안내</span></button>
+      </nav>
+      <div class="sidebar-bottom"><span class="online-dot"></span> 로컬 학습 공간 <small>풀이 기록은 이 컴퓨터에 저장됩니다</small></div>
+    </aside>
+    <main>
+      <header class="topbar"><div><span class="eyebrow">AWS CERTIFIED CLOUD PRACTITIONER</span><h1 id="page-title">오늘의 연습</h1></div><div class="top-chip">CLF-C02 <span>·</span> 개인 학습</div></header>
+      <section class="stats" aria-label="학습 현황">
+        <div class="stat"><span>전체 문제</span><strong id="stat-total">—</strong><small>23개 모의고사</small></div>
+        <div class="stat"><span>풀어본 문제</span><strong id="stat-studied">—</strong><small id="stat-attempts">풀이 기록 —회</small></div>
+        <div class="stat highlight"><span>복습 예정</span><strong id="stat-due">—</strong><small>오늘 다시 볼 문제</small></div>
+      </section>
+      <section id="practice-view" class="view">
+        <div class="section-head"><div><span class="eyebrow">PRACTICE SESSION</span><h2>한 문제씩, 확실하게</h2></div><p>풀이 시간과 오답 기록으로 복습할 문제를 자동으로 고릅니다.</p></div>
+        <div class="controls"><label>문제 모드<select id="mode"><option value="new">새 문제</option><option value="due">복습 예정</option><option value="random">무작위</option></select></label><label>모의고사<select id="exam"><option value="">전체 회차</option></select></label><button id="next" class="secondary">문제 건너뛰기</button></div>
+        <article class="question-card" id="question-card"><div class="loading">문제를 불러오는 중입니다…</div></article>
+      </section>
+      <section id="review-view" class="view hidden">
+        <div class="section-head"><div><span class="eyebrow">REVIEW MAP</span><h2>다시 볼 문제와 개념</h2></div><p>오답과 풀이 시간의 분포를 함께 봅니다.</p></div>
+        <div class="review-heading"><h3>헷갈리는 문제</h3><p id="timing-rule"></p><a id="review-map-link" href="#">Obsidian 오답 지도 열기</a></div>
+        <div id="confusing-list" class="weak-list"></div>
+        <div class="review-heading concepts-heading"><h3>취약 개념</h3><p>오답과 오래 걸린 정답이 쌓인 개념입니다.</p></div>
+        <div id="weak-list" class="weak-list"></div>
+      </section>
+      <section id="guide-view" class="view hidden">
+        <div class="section-head"><div><span class="eyebrow">YOUR STUDY SYSTEM</span><h2>학습 공간 사용법</h2></div></div>
+        <div class="guide-grid"><div class="guide-card"><b>01 · 풀기</b><p>답을 고르고 정답을 확인하세요. 화면에 보인 풀이 시간을 자동으로 기록합니다.</p></div><div class="guide-card"><b>02 · 비교하기</b><p>오답이나 오래 걸린 정답에 AI 비교 해설을 요청하면 Obsidian의 장·카테고리별 오답 노트에 저장됩니다.</p></div><div class="guide-card"><b>03 · 남기기</b><p>내가 틀린 이유를 쓰면 Obsidian 볼트의 해당 개념 노트에 추가됩니다.</p></div></div>
+        <div class="guide-note"><b>공식 기준</b><p>이 문제은행은 제3자 연습 자료입니다. 오래된 지원 플랜·서비스 명칭이 포함될 수 있으므로 표시된 문항은 공식 자료를 확인하세요.</p><a href="https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/cloud-practitioner-02.html" target="_blank" rel="noreferrer">CLF-C02 시험 가이드 열기 ↗</a><p id="vault-path"></p></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

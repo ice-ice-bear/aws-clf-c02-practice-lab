@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+!.env.example
+data/*.sqlite3
+vault/.obsidian/
+vault/Review/
+vault/References/*.pdf
