@@ -13,6 +13,9 @@
 .next-dock .primary{min-width:148px;font-size:13px}
 .result h3{margin:0 0 9px}
 .answer-summary{scroll-margin-top:24px}
+.timing-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px}
+.timing-heading #timing-rule{grid-column:1/-1;grid-row:2;max-width:96ch;font-size:12px;line-height:1.6}
+.timing-heading #review-map-link{grid-column:2;grid-row:1}
 .result-row{margin-top:18px;gap:12px}
 .explanation{white-space:normal;padding:20px 23px;background:#f2f8f6;border-left:3px solid #7fc5b5;border-radius:6px;font-size:13px;line-height:1.75}
 .explanation-body>*:first-child{margin-top:0}

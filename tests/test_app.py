@@ -56,7 +56,7 @@ class StudyFlowTest(unittest.TestCase):
                 questions = db.execute("SELECT id, correct FROM questions WHERE id != 'E01-Q04' LIMIT 8").fetchall()
             for question, seconds in zip(questions, [30, 40, 50, 60, 70, 80, 90, 100]):
                 app.submit_answer(question["id"], json.loads(question["correct"]), seconds)
-            self.assertEqual(app.stats()["timing"]["slow_threshold_seconds"], 82)
+            self.assertEqual(app.stats()["timing"]["slow_threshold_seconds"], 83)
             app.submit_answer("E01-Q04", ["A", "B"], 130)
             app.submit_answer("E01-Q04", ["A", "B"], 140)
             result = app.submit_answer("E01-Q04", ["B", "E"], 150)
@@ -65,12 +65,30 @@ class StudyFlowTest(unittest.TestCase):
             self.assertEqual(result["question_stats"]["avg_seconds"], 140)
             with app.connect() as db:
                 self.assertEqual(db.execute("SELECT streak FROM progress WHERE question_id='E01-Q04'").fetchone()[0], 0)
+            self.assertGreater(app.stats()["timing"]["slow_threshold_seconds"], 83)
             self.assertIn("E01-Q04", [q["id"] for q in app.stats()["confusing_questions"]])
             followup = app.submit_answer("E01-Q04", ["B", "E"], 100)
             self.assertFalse(followup["slow"])
             self.assertTrue(followup["confused"])
             with app.connect() as db:
                 self.assertEqual(db.execute("SELECT streak FROM progress WHERE question_id='E01-Q04'").fetchone()[0], 0)
+
+    def test_fast_personal_distribution_does_not_mark_exam_pace_answer_slow(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app.DB_PATH = Path(temp) / "study.sqlite3"
+            app.init_db()
+            with app.connect() as db:
+                questions = db.execute("SELECT id, correct FROM questions WHERE id != 'E01-Q04' LIMIT 8").fetchall()
+            for question, seconds in zip(questions, [12, 16, 19, 22, 25, 28, 31, 35]):
+                app.submit_answer(question["id"], json.loads(question["correct"]), seconds)
+            result = app.submit_answer("E01-Q04", ["B", "E"], 43)
+            self.assertTrue(result["is_correct"])
+            self.assertFalse(result["slow"])
+            self.assertEqual(result["time_threshold_seconds"], 83)
+            self.assertEqual(result["personal_average_seconds"], 26)
+            self.assertEqual(app.stats()["timing"]["slow_threshold_seconds"], 83)
+            with app.connect() as db:
+                self.assertEqual(db.execute("SELECT streak FROM progress WHERE question_id='E01-Q04'").fetchone()[0], 1)
 
     def test_existing_database_gets_timing_column(self):
         with tempfile.TemporaryDirectory() as temp:

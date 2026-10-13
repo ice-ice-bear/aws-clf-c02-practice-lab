@@ -47,6 +47,7 @@ load_local_env(ROOT / ".env")
 DB_PATH = Path(os.environ.get("AWS_CCP_DB", ROOT / "data" / "study.sqlite3"))
 VAULT = Path(os.environ.get("AWS_CCP_VAULT", ROOT / "vault")).expanduser()
 MODEL = os.environ.get("AWS_CCP_MODEL", "gpt-6-luna")
+EXAM_PACE_SECONDS = round(90 * 60 / 65)
 
 
 def now():
@@ -176,16 +177,19 @@ def question_by_id(question_id):
 
 
 def timing_baseline(db):
-    """Use the learner's own 75th percentile; bootstrap until eight timed answers."""
+    """Use exam pace as a floor for the learner's upper-quartile time."""
     times = sorted(row[0] for row in db.execute(
         "SELECT duration_seconds FROM attempts WHERE duration_seconds IS NOT NULL"))
-    if len(times) < 8:
-        return 90.0, len(times), True
-    position = (len(times) - 1) * .75
-    lower = math.floor(position)
-    fraction = position - lower
-    p75 = times[lower] + (times[min(lower + 1, len(times) - 1)] - times[lower]) * fraction
-    return max(30.0, p75), len(times), False
+    personal_p75 = None
+    if len(times) >= 8:
+        position = (len(times) - 1) * .75
+        lower = math.floor(position)
+        fraction = position - lower
+        personal_p75 = times[lower] + (times[min(lower + 1, len(times) - 1)] - times[lower]) * fraction
+    return {"threshold": max(EXAM_PACE_SECONDS, personal_p75 or 0),
+            "samples": len(times), "provisional": personal_p75 is None,
+            "personal_p75": personal_p75,
+            "average": sum(times) / len(times) if times else None}
 
 
 def submit_answer(question_id, selected, duration_seconds=None):
@@ -204,7 +208,8 @@ def submit_answer(question_id, selected, duration_seconds=None):
         if not selected or not set(selected).issubset(options):
             raise ValueError("Invalid selection")
         correct = selected == sorted(json.loads(q["correct"]))
-        threshold, _, provisional = timing_baseline(db)
+        baseline = timing_baseline(db)
+        threshold = baseline["threshold"]
         slow = duration_seconds is not None and duration_seconds >= threshold
         confidence = "unsure" if slow or not correct else "sure"
         history = db.execute("""SELECT COUNT(*) attempts, AVG(duration_seconds) avg_seconds,
@@ -224,11 +229,16 @@ def submit_answer(question_id, selected, duration_seconds=None):
                               (question_id, json.dumps(selected), int(correct), confidence, now().isoformat(), duration_seconds))
         db.execute("INSERT INTO progress VALUES (?,?,?) ON CONFLICT(question_id) DO UPDATE SET streak=excluded.streak,due_at=excluded.due_at",
                    (question_id, streak, due))
+        personal_average = baseline["average"]
+        if duration_seconds is not None:
+            personal_average = ((personal_average or 0) * baseline["samples"] + duration_seconds) / (baseline["samples"] + 1)
         out = question_dict(q, reveal=True)
         out.update({"is_correct": correct, "selected": selected, "due_at": due,
                     "attempt_id": inserted.lastrowid,
                     "duration_seconds": duration_seconds, "slow": slow, "confused": confused,
-                    "time_threshold_seconds": round(threshold), "timing_provisional": provisional,
+                    "time_threshold_seconds": round(threshold), "timing_provisional": baseline["provisional"],
+                    "exam_pace_seconds": round(EXAM_PACE_SECONDS),
+                    "personal_average_seconds": round(personal_average) if personal_average is not None else None,
                     "question_stats": {"attempts": timed_attempts,
                                        "avg_seconds": round(avg_seconds) if avg_seconds is not None else None,
                                        "wrong_rate": round(wrong_count / timed_attempts, 2) if timed_attempts else None},
@@ -247,7 +257,8 @@ def stats():
                              GROUP BY q.concept_id ORDER BY weak DESC, n DESC""").fetchall()
         weak = [{**as_dict(BY_ID[r["concept_id"]]), "attempts": r["n"], "weak": r["weak"]}
                 for r in rows if r["weak"]]
-        threshold, timed_count, provisional = timing_baseline(db)
+        baseline = timing_baseline(db)
+        threshold = baseline["threshold"]
         question_rows = db.execute("""SELECT q.id, q.exam, q.number, q.stem, q.concept_id,
                                           COUNT(*) attempts, AVG(a.duration_seconds) avg_seconds,
                                           SUM(CASE WHEN a.correct=0 THEN 1 ELSE 0 END) wrong
@@ -262,8 +273,11 @@ def stats():
         confusing.sort(key=lambda r: (r["wrong_rate"], r["avg_seconds"]), reverse=True)
         return {"total": total, "attempts": attempts, "studied": distinct, "due": due, "weak": weak,
                 "confusing_questions": confusing[:12],
-                "timing": {"samples": timed_count, "slow_threshold_seconds": round(threshold),
-                           "provisional": provisional},
+                "timing": {"samples": baseline["samples"], "slow_threshold_seconds": round(threshold),
+                           "provisional": baseline["provisional"],
+                           "exam_pace_seconds": round(EXAM_PACE_SECONDS),
+                           "personal_p75_seconds": round(baseline["personal_p75"]) if baseline["personal_p75"] is not None else None,
+                           "average_seconds": round(baseline["average"]) if baseline["average"] is not None else None},
                 "model": MODEL, "api_ready": bool(os.getenv("OPENAI_API_KEY")), "vault": str(VAULT)}
 
 

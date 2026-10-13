@@ -53,7 +53,9 @@ async function refreshStats() {
   $('stat-attempts').textContent=`풀이 기록 ${s.attempts}회`; $('stat-due').textContent=s.due;
   $('vault-path').textContent=`Obsidian 볼트: ${s.vault} · AI 해설: ${s.api_ready ? s.model+' 연결 준비됨' : 'API 키 설정 필요'}`;
   $('review-map-link').href=`obsidian://open?path=${encodeURIComponent(`${s.vault}/Review/00-오답-지도.md`)}`;
-  $('timing-rule').textContent=`${s.timing.provisional ? '초기 기준' : '내 풀이 시간 상위 25% 기준'} ${formatTime(s.timing.slow_threshold_seconds)} · 시간 기록 ${s.timing.samples}건 · 같은 문제 3회 이상 풀이 시 판정`;
+  const personalPace=s.timing.personal_p75_seconds===null?'개인 기준은 8회 후 반영':`시험 페이스와 내 상위 25% ${formatTime(s.timing.personal_p75_seconds)} 중 긴 시간`;
+  const overallPace=s.timing.average_seconds===null?'내 평균 계산 중':`내 평균 ${formatTime(s.timing.average_seconds)} (${s.timing.samples}회)`;
+  $('timing-rule').textContent=`시험 65문항·90분 ≈ ${formatTime(s.timing.exam_pace_seconds)}/문항 · ${overallPace} · 느린 기준 ${formatTime(s.timing.slow_threshold_seconds)} (${personalPace}) · 반복 3회+·오답률 40%+·문항 평균이 기준 이상일 때 표시`;
   const confusing=$('confusing-list');confusing.replaceChildren();
   if(!s.confusing_questions.length){confusing.append(el('div','empty-review','아직 분포를 판단할 만큼 반복해서 푼 문제가 없습니다. 오답은 아래 취약 개념에 바로 반영됩니다.'));}
   for(const q of s.confusing_questions){
@@ -101,7 +103,7 @@ function renderQuestion() {
   const result=el('div','result'), title=el('h3',answered.is_correct?'good':'bad',answered.is_correct?'정답입니다':'다시 살펴볼 문제입니다');
   title.tabIndex=-1;result.append(title);
   const summary=el('p','answer-summary',`문제은행 정답: ${answered.correct.join(', ')} · ${answered.offline_explanation}`);result.append(summary);
-  const timing=answered.duration_seconds===null?'풀이 시간 미기록':`풀이 ${formatTime(answered.duration_seconds)} · 이 문제 평균 ${formatTime(answered.question_stats.avg_seconds)} (${answered.question_stats.attempts}회)`;
+  const timing=answered.duration_seconds===null?'풀이 시간 미기록':`풀이 ${formatTime(answered.duration_seconds)} · 이 문제 평균 ${formatTime(answered.question_stats.avg_seconds)} (${answered.question_stats.attempts}회) · 내 전체 평균 ${formatTime(answered.personal_average_seconds)} · 느린 기준 ${formatTime(answered.time_threshold_seconds)}`;
   const interpretation=answered.is_correct?(answered.confused?'반복 오답과 평균 풀이 시간이 높아 내일 다시 봅니다.':answered.slow?'오래 걸린 정답이라 내일 다시 봅니다.':'정답을 맞혀 복습 간격이 늘어났습니다.'):'오답이라 내일 다시 봅니다.';
   const timingFeedback=el('p','timing-feedback',`${timing} · ${interpretation}`);
   const row=el('div','result-row');
