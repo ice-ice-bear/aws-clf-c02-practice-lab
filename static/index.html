@@ -27,9 +27,16 @@
         <div class="stat highlight"><span>복습 예정</span><strong id="stat-due">—</strong><small>오늘 다시 볼 문제</small></div>
       </section>
       <section id="practice-view" class="view">
-        <div class="section-head"><div><span class="eyebrow">PRACTICE SESSION</span><h2>한 문제씩, 확실하게</h2></div><p>풀이 시간과 오답 기록으로 복습할 문제를 자동으로 고릅니다.</p></div>
-        <div class="controls"><label>문제 모드<select id="mode"><option value="new">새 문제</option><option value="due">복습 예정</option><option value="random">무작위</option></select></label><label>모의고사<select id="exam"><option value="">전체 회차</option></select></label><button id="next" class="secondary">문제 건너뛰기</button></div>
-        <article class="question-card" id="question-card"><div class="loading">문제를 불러오는 중입니다…</div></article>
+        <div class="section-head"><div><span class="eyebrow">PRACTICE SESSION</span><h2>오늘 풀 범위를 정하세요</h2></div><p>한 문제만 풀어도 오답과 풀이 시간이 복습 기록에 반영됩니다.</p></div>
+        <div id="session-setup" class="session-setup hidden">
+          <div class="setup-heading"><div><h3>새 문제 세트</h3><p>범위가 정해지면 중간에 멈춰도 이어서 풀 수 있습니다.</p></div><button id="resume-session" class="secondary hidden" type="button">이어서 풀기</button></div>
+          <div class="controls"><label>풀이 방식<select id="session-kind"><option value="exam">회차별 모의고사</option><option value="balanced">시험 비중 랜덤</option><option value="due">복습 예정</option><option value="all">전체 문제</option></select></label><label id="exam-field">모의고사 회차<select id="exam"></select></label><label id="count-field" class="hidden">문항 수 (5~100)<input id="count" type="number" min="5" max="100" step="1" value="20" inputmode="numeric"></label><button id="start-session" class="primary" type="button">세트 시작</button></div>
+          <p id="session-help" class="setup-help">원본 모의고사 순서대로 풉니다. 이 문제은행은 공식 기출이 아닌 제3자 연습 자료입니다.</p>
+          <p id="session-error" class="setup-error" role="alert"></p>
+          <div id="recent-sessions" class="recent-sessions hidden"><h4>최근 세트</h4><div id="recent-session-list"></div></div>
+        </div>
+        <div id="session-bar" class="session-bar hidden"><div class="session-progress"><strong id="session-name"></strong><span id="session-count"></span><div class="progress-track"><div id="progress-fill"></div></div></div><button id="next" class="secondary" type="button">문제 건너뛰기</button><button id="new-session" class="secondary" type="button">새 세트</button></div>
+        <article class="question-card" id="question-card"><div class="loading">학습 내역을 불러오는 중입니다…</div></article>
         <div id="next-dock" class="next-dock hidden"><span>정답을 확인했다면 계속 풀어보세요.</span><button id="next-answer" class="primary" type="button">다음 문제</button></div>
       </section>
       <section id="review-view" class="view hidden">
@@ -41,7 +48,7 @@
       </section>
       <section id="guide-view" class="view hidden">
         <div class="section-head"><div><span class="eyebrow">YOUR STUDY SYSTEM</span><h2>학습 공간 사용법</h2></div></div>
-        <div class="guide-grid"><div class="guide-card"><b>01 · 풀기</b><p>답을 고르고 정답을 확인하세요. 화면에 보인 풀이 시간을 자동으로 기록합니다.</p></div><div class="guide-card"><b>02 · 비교하기</b><p>오답이나 오래 걸린 정답에 AI 비교 해설을 요청하면 Obsidian의 장·카테고리별 오답 노트에 저장됩니다.</p></div><div class="guide-card"><b>03 · 남기기</b><p>내가 틀린 이유를 쓰면 Obsidian 볼트의 해당 개념 노트에 추가됩니다.</p></div></div>
+        <div class="guide-grid"><div class="guide-card"><b>01 · 풀기</b><p>회차별, 시험 비중 랜덤, 복습 예정, 전체 문제 중 범위를 고르세요. 답을 제출하면 풀이 시간이 기록되고 중간에 멈춰도 이어서 풀 수 있습니다.</p></div><div class="guide-card"><b>02 · 비교하기</b><p>오답이나 오래 걸린 정답에 AI 비교 해설을 요청하면 Obsidian의 장·카테고리별 오답 노트에 저장됩니다.</p></div><div class="guide-card"><b>03 · 남기기</b><p>내가 틀린 이유를 쓰면 Obsidian 볼트의 해당 개념 노트에 추가됩니다.</p></div></div>
         <div class="guide-note"><b>공식 기준</b><p>이 문제은행은 제3자 연습 자료입니다. 오래된 지원 플랜·서비스 명칭이 포함될 수 있으므로 표시된 문항은 공식 자료를 확인하세요.</p><a href="https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/cloud-practitioner-02.html" target="_blank" rel="noreferrer">CLF-C02 시험 가이드 열기 ↗</a><p id="vault-path"></p></div>
       </section>
     </main>

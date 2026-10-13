@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let current = null, selected = new Set(), answered = null, currentView = 'practice';
 let elapsedMs = 0, startedAt = null, loading = false;
+let session = null, adHoc = false, setupOpen = false;
 
 function pauseTimer() { if(startedAt!==null){elapsedMs+=performance.now()-startedAt;startedAt=null;} }
 function resumeTimer() { if(current && !answered && currentView==='practice' && !document.hidden && startedAt===null) startedAt=performance.now(); }
@@ -74,9 +75,17 @@ async function refreshStats() {
 }
 function renderQuestion() {
   const card=$('question-card');card.replaceChildren();
-  $('next').classList.toggle('hidden',Boolean(answered));
+  renderSessionChrome();
   $('next-dock').classList.toggle('hidden',!answered || !current);
-  if(!current){card.append(el('div','loading','이 조건에 맞는 문제가 없습니다. 모드나 회차를 바꿔 보세요.'));return;}
+  $('next-answer').textContent=adHoc?'세트로 돌아가기':session?.position===session?.total?'결과 보기':'다음 문제';
+  if(!current){
+    if(session?.complete){
+      const done=el('div','session-complete');done.append(el('span','badge','세트 완료'),el('h3','',`${session.total}문항을 마쳤습니다`),
+        el('p','',`정답 ${session.correct}문항 · 오답 ${session.answered-session.correct}문항 · 건너뜀 ${session.skipped}문항. 오답과 풀이 시간은 취약 개념에 반영되었습니다.`));
+      const action=el('button','primary','새 세트 고르기');action.onclick=()=>{setupOpen=true;renderSessionChrome();refreshSessionList();$('session-setup').scrollIntoView({block:'start'});};done.append(action);card.append(done);
+    }else card.append(el('div','loading','풀이 방식을 선택해 세트를 시작하세요.'));
+    return;
+  }
   const top=el('div','question-top'), badge=el('span','badge',current.concept.title), no=el('span','question-no',`EXAM ${String(current.exam).padStart(2,'0')} / Q${String(current.number).padStart(2,'0')}`);
   top.append(badge,no);card.append(top);
   if(current.needs_review){card.append(el('span','badge warn','현재 AWS 공식 자료 재확인 권장'));}
@@ -95,7 +104,10 @@ function renderQuestion() {
   if(!answered){
     const actions=el('div','question-actions'), hint=el('span','time-hint','풀이 시간 자동 기록 · 화면을 벗어난 시간은 제외'), submit=el('button','primary','정답 확인');submit.disabled=!selected.size || loading;
     submit.onclick=async()=>{if(loading)return;loading=true;submit.disabled=true;submit.textContent='채점 중…';
-      try{answered=await api('/api/answer',{id:current.id,selected:[...selected],duration_seconds:answerSeconds()});renderQuestion();
+      try{answered=await api('/api/answer',{id:current.id,selected:[...selected],duration_seconds:answerSeconds(),
+        ...(session && !adHoc ? {session_id:session.id} : {})});
+        if(session && !adHoc){session.answered++;if(answered.is_correct)session.correct++;}
+        renderQuestion();
         const result=card.querySelector('.result');result?.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});refreshStats().catch(console.error);
       }catch(error){resumeTimer();submit.disabled=false;submit.textContent='정답 확인';alert(error.message);}finally{loading=false;}};
     actions.append(hint,submit);card.append(actions);return;
@@ -139,21 +151,92 @@ function renderQuestion() {
   box.append(label,textarea,save,msg);result.append(box);
   card.append(result);
 }
-async function loadQuestion(questionId=null){
+function sessionLabel(value) {
+  if(value.kind==='exam')return `${value.exam}회차 모의고사`;
+  return {balanced:'시험 비중 랜덤',due:'복습 예정',all:'전체 문제'}[value.kind];
+}
+function renderSessionChrome() {
+  $('session-setup').classList.toggle('hidden',!setupOpen);
+  $('resume-session').classList.toggle('hidden',!session || session.complete);
+  $('session-bar').classList.toggle('hidden',!session || adHoc);
+  if(session && !adHoc){
+    $('session-name').textContent=sessionLabel(session);
+    $('session-count').textContent=session.complete?`${session.answered}문항 풀이 완료`:`${session.position} / ${session.total} · ${session.answered}문항 풀이`;
+    $('progress-fill').style.width=`${100*(session.complete?session.total:session.position-1)/session.total}%`;
+  }
+  $('next').classList.toggle('hidden',Boolean(answered) || !current || adHoc || session?.complete);
+}
+function updateSetup() {
+  const kind=$('session-kind').value;
+  $('exam-field').classList.toggle('hidden',kind!=='exam');
+  $('count-field').classList.toggle('hidden',!['balanced','due'].includes(kind));
+  $('session-help').textContent={
+    exam:'원본 모의고사 순서대로 풉니다. 이 문제은행은 공식 기출이 아닌 제3자 연습 자료입니다.',
+    balanced:'CLF-C02 채점 영역 비중 24% · 30% · 34% · 12%에 가깝게 섞습니다. 65문항은 실제 시험 길이이며, 영역 분류는 근사치입니다.',
+    due:'오늘 복습할 문제에서 선택합니다. 예정된 문제가 적으면 그 수만큼만 세트를 만듭니다.',
+    all:'문제은행 전체를 회차 순서대로 풉니다. 언제든 중단하고 이어서 풀 수 있습니다.'
+  }[kind];
+}
+async function refreshSessionList() {
+  const value=await api('/api/sessions'), list=$('recent-session-list');list.replaceChildren();
+  $('recent-sessions').classList.toggle('hidden',!value.sessions.length);
+  for(const previous of value.sessions){
+    const row=el('div','recent-session'), detail=el('div');
+    detail.append(el('strong','',sessionLabel(previous)),
+      el('span','',`${new Date(previous.created_at).toLocaleDateString('ko-KR')} · ${previous.answered}/${previous.total}문항 풀이${previous.complete?' · 완료':''}`));
+    const open=el('button','secondary',previous.id===session?.id?'현재 세트':'이어 풀기');
+    open.onclick=()=>loadSession(previous.id);
+    row.append(detail,open);list.append(row);
+  }
+}
+function applySession(value, shouldScroll=false) {
+  pauseTimer();session=value;adHoc=false;setupOpen=!session;current=session?.question || null;
+  selected=new Set();answered=null;elapsedMs=0;startedAt=null;renderQuestion();resumeTimer();
+  if(shouldScroll)$('question-card').scrollIntoView({block:'start',behavior:'auto'});
+}
+async function loadSession(sessionId=null) {
+  if(loading)return;loading=true;
+  try{const value=sessionId?await api('/api/session/activate',{id:sessionId}):await api('/api/session');
+    applySession(value.session,Boolean(sessionId));
+    if(setupOpen)await refreshSessionList();}
+  catch(error){$('question-card').replaceChildren(el('div','loading',error.message));}
+  finally{loading=false;}
+}
+async function startSession() {
+  if(loading)return;loading=true;$('session-error').textContent='';$('start-session').disabled=true;
+  const kind=$('session-kind').value;
+  try{const value=await api('/api/session',{kind,
+    ...(kind==='exam'?{exam:Number($('exam').value)}:{}),
+    ...(['balanced','due'].includes(kind)?{count:Number($('count').value)}:{})});
+    applySession(value.session,true);
+  }catch(error){$('session-error').textContent=error.message;}
+  finally{loading=false;$('start-session').disabled=false;}
+}
+async function advanceQuestion() {
   if(loading)return;
-  const shouldScroll=Boolean(current || questionId);
-  loading=true;pauseTimer();
-  $('next-dock').classList.add('hidden');
-  $('question-card').replaceChildren(el('div','loading','문제를 불러오는 중입니다…'));
-  try{const query=new URLSearchParams({mode:$('mode').value});if($('exam').value)query.set('exam',$('exam').value);
-    if(questionId)query.set('id',questionId);else if(current)query.set('exclude',current.id);
-    const value=await api(`/api/next?${query}`);current=value.question;selected=new Set();answered=null;elapsedMs=0;startedAt=null;renderQuestion();resumeTimer();
-    if(shouldScroll)$('question-card').scrollIntoView({block:'start',behavior:'auto'});
-  }catch(error){$('question-card').replaceChildren(el('div','loading',error.message));}finally{loading=false;}
+  if(adHoc){await loadSession();return;}
+  if(!session || !current)return;
+  loading=true;pauseTimer();$('next-dock').classList.add('hidden');
+  const questionId=current.id;
+  try{const value=await api('/api/session/advance',{session_id:session.id,question_id:questionId});
+    applySession(value.session,true);
+  }catch(error){resumeTimer();alert(error.message);}
+  finally{loading=false;}
+}
+async function loadQuestion(questionId){
+  if(loading)return;loading=true;pauseTimer();
+  try{const value=await api(`/api/next?id=${encodeURIComponent(questionId)}`);
+    adHoc=true;current=value.question;selected=new Set();answered=null;elapsedMs=0;startedAt=null;
+    renderQuestion();resumeTimer();$('question-card').scrollIntoView({block:'start',behavior:'auto'});
+  }catch(error){$('question-card').replaceChildren(el('div','loading',error.message));}
+  finally{loading=false;}
 }
 for(let i=1;i<=23;i++){const option=el('option','',`${i}회차`);option.value=i;$('exam').append(option);}
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>setView(button.dataset.view));
-$('next').onclick=()=>loadQuestion();$('next-answer').onclick=()=>loadQuestion();$('mode').onchange=()=>loadQuestion();$('exam').onchange=()=>loadQuestion();
+$('next').onclick=advanceQuestion;$('next-answer').onclick=advanceQuestion;
+$('session-kind').onchange=updateSetup;$('start-session').onclick=startSession;
+$('new-session').onclick=()=>{setupOpen=true;renderSessionChrome();refreshSessionList().catch(console.error);$('session-setup').scrollIntoView({block:'start'});};
+$('resume-session').onclick=()=>{setupOpen=false;renderSessionChrome();$('question-card').scrollIntoView({block:'start'});};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseTimer();else resumeTimer();});
-document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='n' && answered && currentView==='practice' && !event.repeat && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){event.preventDefault();loadQuestion();}});
-refreshStats().catch(console.error);loadQuestion();
+document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='n' && answered && currentView==='practice' && !event.repeat && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){event.preventDefault();advanceQuestion();}});
+updateSetup();refreshStats().catch(console.error);loadSession();

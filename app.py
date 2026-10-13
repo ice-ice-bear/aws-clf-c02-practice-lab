@@ -48,6 +48,8 @@ DB_PATH = Path(os.environ.get("AWS_CCP_DB", ROOT / "data" / "study.sqlite3"))
 VAULT = Path(os.environ.get("AWS_CCP_VAULT", ROOT / "vault")).expanduser()
 MODEL = os.environ.get("AWS_CCP_MODEL", "gpt-6-luna")
 EXAM_PACE_SECONDS = round(90 * 60 / 65)
+DOMAIN_WEIGHTS = {"클라우드 개념": 24, "보안 및 규정 준수": 30,
+                  "클라우드 기술 및 서비스": 34, "청구·요금·지원": 12}
 
 
 def now():
@@ -87,6 +89,19 @@ def init_db():
         CREATE TABLE IF NOT EXISTS explanations (
             cache_key TEXT PRIMARY KEY, body TEXT NOT NULL, model TEXT NOT NULL,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY, kind TEXT NOT NULL, exam INTEGER,
+            created_at TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS session_items (
+            session_id INTEGER NOT NULL REFERENCES sessions(id), position INTEGER NOT NULL,
+            question_id TEXT NOT NULL REFERENCES questions(id),
+            attempt_id INTEGER REFERENCES attempts(id),
+            PRIMARY KEY(session_id, position)
+        );
+        CREATE TABLE IF NOT EXISTS session_state (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL
         );
         """)
         # Existing local study histories predate automatic timing.
@@ -176,6 +191,136 @@ def question_by_id(question_id):
         return question_dict(row) if row else None
 
 
+def balanced_counts(size):
+    """Allocate approximate CLF-C02 scored-domain weights by largest remainder."""
+    counts = {domain: size * weight // 100 for domain, weight in DOMAIN_WEIGHTS.items()}
+    remaining = size - sum(counts.values())
+    order = sorted(DOMAIN_WEIGHTS, key=lambda d: (size * DOMAIN_WEIGHTS[d] % 100,
+                                                   DOMAIN_WEIGHTS[d]), reverse=True)
+    for domain in order[:remaining]:
+        counts[domain] += 1
+    return counts
+
+
+def create_session(kind, exam=None, count=None):
+    if kind not in ("exam", "balanced", "all", "due"):
+        raise ValueError("Invalid session kind")
+    if kind == "exam":
+        if isinstance(exam, bool) or not isinstance(exam, int) or not 1 <= exam <= 23:
+            raise ValueError("Select a valid exam")
+    elif exam is not None:
+        raise ValueError("Exam is only used for exam sessions")
+    if kind in ("balanced", "due"):
+        if isinstance(count, bool) or not isinstance(count, int) or not 5 <= count <= 100:
+            raise ValueError("Select 5 to 100 questions")
+    elif count is not None:
+        raise ValueError("Count is only used for random or review sessions")
+    with connect() as db:
+        if kind == "exam":
+            rows = db.execute("SELECT id FROM questions WHERE exam=? ORDER BY number", (exam,)).fetchall()
+            ids = [row["id"] for row in rows]
+        elif kind == "all":
+            rows = db.execute("SELECT id FROM questions ORDER BY exam, number").fetchall()
+            ids = [row["id"] for row in rows]
+        elif kind == "due":
+            rows = db.execute("""SELECT q.id FROM questions q JOIN progress p ON p.question_id=q.id
+                                 WHERE p.due_at<=? ORDER BY p.due_at, RANDOM() LIMIT ?""",
+                              (now().isoformat(), count)).fetchall()
+            ids = [row["id"] for row in rows]
+        else:
+            rows = db.execute("""SELECT q.id, q.concept_id, p.question_id IS NULL AS unseen
+                                 FROM questions q LEFT JOIN progress p ON p.question_id=q.id""").fetchall()
+            buckets = {domain: [] for domain in DOMAIN_WEIGHTS}
+            for row in rows:
+                buckets[BY_ID[row["concept_id"]][2]].append(row)
+            quotas = balanced_counts(count)
+            ids = []
+            for domain, pool in buckets.items():
+                unseen = [row["id"] for row in pool if row["unseen"]]
+                seen = [row["id"] for row in pool if not row["unseen"]]
+                selected = random.sample(unseen, min(len(unseen), quotas[domain]))
+                selected.extend(random.sample(seen, min(len(seen), quotas[domain] - len(selected))))
+                ids.extend(selected)
+            if len(ids) < count:
+                chosen = set(ids)
+                ids.extend(random.sample([row["id"] for row in rows if row["id"] not in chosen],
+                                         min(count - len(ids), len(rows) - len(ids))))
+            random.shuffle(ids)
+        if not ids:
+            raise ValueError("선택한 조건에 맞는 문제가 없습니다")
+        session_id = db.execute("INSERT INTO sessions(kind,exam,created_at) VALUES (?,?,?)",
+                                (kind, exam, now().isoformat())).lastrowid
+        db.executemany("INSERT INTO session_items(session_id,position,question_id) VALUES (?,?,?)",
+                       [(session_id, position, question_id) for position, question_id in enumerate(ids)])
+        db.execute("INSERT INTO session_state(key,value) VALUES ('active',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                   (str(session_id),))
+    return session_details(session_id)
+
+
+def session_details(session_id=None):
+    with connect() as db:
+        if session_id is None:
+            active = db.execute("SELECT value FROM session_state WHERE key='active'").fetchone()
+            session = db.execute("SELECT * FROM sessions WHERE id=?", (active["value"],)).fetchone() if active else None
+            if not session:
+                session = db.execute("SELECT * FROM sessions ORDER BY id DESC LIMIT 1").fetchone()
+        else:
+            session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if not session:
+            return None
+        items = db.execute("""SELECT si.*, a.correct FROM session_items si
+                              LEFT JOIN attempts a ON a.id=si.attempt_id
+                              WHERE si.session_id=? ORDER BY si.position""", (session["id"],)).fetchall()
+        cursor = session["cursor"]
+        while cursor < len(items) and items[cursor]["attempt_id"] is not None:
+            cursor += 1
+        if cursor != session["cursor"]:
+            db.execute("UPDATE sessions SET cursor=? WHERE id=?", (cursor, session["id"]))
+        current_id = items[cursor]["question_id"] if cursor < len(items) else None
+        question = db.execute("SELECT * FROM questions WHERE id=?", (current_id,)).fetchone() if current_id else None
+        answered = sum(item["attempt_id"] is not None for item in items)
+        correct = sum(item["correct"] == 1 for item in items)
+        return {"id": session["id"], "kind": session["kind"], "exam": session["exam"],
+                "total": len(items), "position": cursor + 1 if question else len(items),
+                "answered": answered, "correct": correct, "skipped": cursor - answered if question else len(items) - answered,
+                "complete": question is None, "question": question_dict(question) if question else None}
+
+
+def recent_sessions():
+    with connect() as db:
+        rows = db.execute("""SELECT s.id, s.kind, s.exam, s.created_at, s.cursor,
+                                    COUNT(si.position) total,
+                                    SUM(CASE WHEN si.attempt_id IS NOT NULL THEN 1 ELSE 0 END) answered
+                             FROM sessions s JOIN session_items si ON si.session_id=s.id
+                             GROUP BY s.id ORDER BY s.id DESC LIMIT 8""").fetchall()
+        return [{"id": row["id"], "kind": row["kind"], "exam": row["exam"],
+                 "created_at": row["created_at"], "total": row["total"],
+                 "answered": row["answered"], "complete": row["cursor"] >= row["total"]}
+                for row in rows]
+
+
+def activate_session(session_id):
+    with connect() as db:
+        if not db.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone():
+            raise ValueError("Unknown session")
+        db.execute("INSERT INTO session_state(key,value) VALUES ('active',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                   (str(session_id),))
+    return session_details(session_id)
+
+
+def advance_session(session_id, question_id):
+    with connect() as db:
+        session = db.execute("SELECT cursor FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if not session:
+            raise ValueError("Unknown session")
+        item = db.execute("SELECT question_id FROM session_items WHERE session_id=? AND position=?",
+                          (session_id, session["cursor"])).fetchone()
+        if not item or item["question_id"] != question_id:
+            raise ValueError("Session position changed; reload the session")
+        db.execute("UPDATE sessions SET cursor=cursor+1 WHERE id=?", (session_id,))
+    return session_details(session_id)
+
+
 def timing_baseline(db):
     """Use exam pace as a floor for the learner's upper-quartile time."""
     times = sorted(row[0] for row in db.execute(
@@ -192,7 +337,7 @@ def timing_baseline(db):
             "average": sum(times) / len(times) if times else None}
 
 
-def submit_answer(question_id, selected, duration_seconds=None):
+def submit_answer(question_id, selected, duration_seconds=None, session_id=None):
     if not isinstance(selected, list):
         raise ValueError("selected must be a list")
     if duration_seconds is not None:
@@ -200,6 +345,15 @@ def submit_answer(question_id, selected, duration_seconds=None):
                 or not math.isfinite(duration_seconds) or not 1 <= duration_seconds <= 1800):
             raise ValueError("Invalid answer time")
     with connect() as db:
+        if session_id is not None:
+            if isinstance(session_id, bool) or not isinstance(session_id, int):
+                raise ValueError("Invalid session")
+            session = db.execute("SELECT cursor FROM sessions WHERE id=?", (session_id,)).fetchone()
+            item = db.execute("""SELECT question_id, attempt_id FROM session_items
+                                 WHERE session_id=? AND position=?""",
+                              (session_id, session["cursor"])).fetchone() if session else None
+            if not item or item["question_id"] != question_id or item["attempt_id"] is not None:
+                raise ValueError("Session position changed; reload the session")
         q = db.execute("SELECT * FROM questions WHERE id=?", (question_id,)).fetchone()
         if not q:
             raise ValueError("Unknown question")
@@ -227,6 +381,9 @@ def submit_answer(question_id, selected, duration_seconds=None):
         due = (now() + timedelta(days=days)).isoformat()
         inserted = db.execute("INSERT INTO attempts(question_id,selected,correct,confidence,created_at,duration_seconds) VALUES (?,?,?,?,?,?)",
                               (question_id, json.dumps(selected), int(correct), confidence, now().isoformat(), duration_seconds))
+        if session_id is not None:
+            db.execute("UPDATE session_items SET attempt_id=? WHERE session_id=? AND position=?",
+                       (inserted.lastrowid, session_id, session["cursor"]))
         db.execute("INSERT INTO progress VALUES (?,?,?) ON CONFLICT(question_id) DO UPDATE SET streak=excluded.streak,due_at=excluded.due_at",
                    (question_id, streak, due))
         personal_average = baseline["average"]
@@ -392,6 +549,13 @@ class Handler(BaseHTTPRequestHandler):
         args = parse_qs(parsed.query)
         if parsed.path == "/api/stats":
             return self.respond(stats())
+        if parsed.path == "/api/session":
+            session_id = args.get("id", [None])[0]
+            if session_id is not None and not session_id.isdecimal():
+                return self.respond({"error": "Invalid session"}, 400)
+            return self.respond({"session": session_details(int(session_id) if session_id else None)})
+        if parsed.path == "/api/sessions":
+            return self.respond({"sessions": recent_sessions()})
         if parsed.path == "/api/next":
             mode = args.get("mode", ["random"])[0]
             exam = args.get("exam", [None])[0]
@@ -426,7 +590,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Request too large")
             data = json.loads(self.rfile.read(length))
             if self.path == "/api/answer":
-                return self.respond(submit_answer(data["id"], data["selected"], data.get("duration_seconds")))
+                return self.respond(submit_answer(data["id"], data["selected"], data.get("duration_seconds"), data.get("session_id")))
+            if self.path == "/api/session":
+                return self.respond({"session": create_session(data["kind"], data.get("exam"), data.get("count"))})
+            if self.path == "/api/session/activate":
+                return self.respond({"session": activate_session(data["id"])})
+            if self.path == "/api/session/advance":
+                return self.respond({"session": advance_session(data["session_id"], data["question_id"])})
             if self.path == "/api/explain":
                 return self.respond(explain(data["id"], data.get("selected", []), data.get("attempt_id")))
             if self.path == "/api/save-note":

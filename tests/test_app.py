@@ -7,6 +7,52 @@ import app
 
 
 class StudyFlowTest(unittest.TestCase):
+    def test_exam_and_balanced_sessions_resume_without_finishing_bank(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app.DB_PATH = Path(temp) / "study.sqlite3"
+            app.init_db()
+            exam = app.create_session("exam", exam=12)
+            self.assertEqual((exam["total"], exam["question"]["id"]), (42, "E12-Q01"))
+            first = app.submit_answer("E12-Q01", ["A"], 40, exam["id"])
+            self.assertEqual(app.stats()["studied"], 1)
+            self.assertEqual(app.session_details(exam["id"])["question"]["id"], "E12-Q02")
+            self.assertEqual(app.advance_session(exam["id"], "E12-Q02")["question"]["id"], "E12-Q03")
+            balanced = app.create_session("balanced", count=65)
+            with app.connect() as db:
+                domains = db.execute("""SELECT q.concept_id FROM session_items si
+                                        JOIN questions q ON q.id=si.question_id WHERE si.session_id=?""",
+                                     (balanced["id"],)).fetchall()
+            from collections import Counter
+            counts = Counter(app.BY_ID[row["concept_id"]][2] for row in domains)
+            self.assertEqual(counts, app.balanced_counts(65))
+            self.assertEqual(len({row["concept_id"] for row in domains}) > 1, True)
+            self.assertEqual(app.session_details()["id"], balanced["id"])
+            self.assertEqual([item["id"] for item in app.recent_sessions()], [balanced["id"], exam["id"]])
+            self.assertEqual(app.session_details(exam["id"])["question"]["id"], "E12-Q03")
+            app.activate_session(exam["id"])
+            self.assertEqual(app.session_details()["id"], exam["id"])
+            self.assertEqual(app.create_session("balanced", count=17)["total"], 17)
+            with self.assertRaisesRegex(ValueError, "5 to 100"):
+                app.create_session("balanced", count=101)
+            self.assertEqual(first["attempt_id"], 1)
+
+    def test_due_session_uses_only_due_questions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app.DB_PATH = Path(temp) / "study.sqlite3"
+            app.init_db()
+            with self.assertRaisesRegex(ValueError, "맞는 문제가 없습니다"):
+                app.create_session("due", count=10)
+            app.submit_answer("E01-Q01", ["A"], 35)
+            with app.connect() as db:
+                db.execute("UPDATE progress SET due_at=? WHERE question_id='E01-Q01'",
+                           ((app.now() - app.timedelta(days=1)).isoformat(),))
+            due = app.create_session("due", count=10)
+            self.assertEqual((due["total"], due["question"]["id"]), (1, "E01-Q01"))
+            app.submit_answer("E01-Q01", ["A"], 22, due["id"])
+            finished = app.advance_session(due["id"], "E01-Q01")
+            self.assertTrue(finished["complete"])
+            self.assertEqual((finished["answered"], finished["skipped"]), (1, 0))
+
     def test_source_line_breaks_and_verified_question_links(self):
         with tempfile.TemporaryDirectory() as temp:
             app.DB_PATH = Path(temp) / "study.sqlite3"
