@@ -6,3 +6,4 @@ __pycache__/
 !.env.example
 data/*.sqlite3
 vault/
+.obsidian/

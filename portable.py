@@ -15,6 +15,7 @@ import app
 
 ROOT = Path(__file__).resolve().parent
 PREFIX = "aws-clf-c02-practice-lab/"
+PRIVATE_FORMAT = 2
 SOURCE_FILES = ("README.md", ".gitignore", ".env.example")
 SOURCE_DIRS = ("static", "tests", "templates")
 DATA_FILES = ("data/questions.json", "data/UPSTREAM_LICENSE")
@@ -36,6 +37,10 @@ def source_paths():
         for path in sorted((ROOT / name).rglob("*")):
             if path.is_file() and not path.is_symlink() and not path.name.startswith(".DS_Store") and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 yield path.relative_to(ROOT).as_posix(), path
+    yield from personal_paths()
+
+
+def personal_paths():
     if not app.VAULT.is_dir():
         raise FileNotFoundError(app.VAULT)
     for path in sorted(app.VAULT.rglob("*")):
@@ -43,6 +48,13 @@ def source_paths():
             raise ValueError(f"볼트 안 심볼릭 링크는 직접 복사해야 합니다: {path}")
         if path.is_file() and path.name != ".DS_Store":
             yield "vault/" + path.relative_to(app.VAULT).as_posix(), path
+    root_settings = ROOT / ".obsidian"
+    if root_settings.is_dir():
+        for path in sorted(root_settings.rglob("*")):
+            if path.is_symlink():
+                raise ValueError(f"Obsidian 설정 안 심볼릭 링크는 직접 복사해야 합니다: {path}")
+            if path.is_file() and path.name != ".DS_Store":
+                yield ".obsidian/" + path.relative_to(root_settings).as_posix(), path
 
 
 def database_snapshot(path):
@@ -60,7 +72,7 @@ def database_snapshot(path):
     return counts
 
 
-def export(destination):
+def export(destination, private=False):
     destination = Path(destination).expanduser().resolve()
     if destination.is_relative_to(ROOT) or destination.exists():
         raise ValueError("백업 파일은 프로젝트 바깥의 새 경로에 저장하세요.")
@@ -68,19 +80,21 @@ def export(destination):
     with tempfile.TemporaryDirectory() as temp:
         db_snapshot = Path(temp) / "study.sqlite3"
         counts = database_snapshot(db_snapshot)
-        entries = list(source_paths()) + [("data/study.sqlite3", db_snapshot)]
+        entries = (list(personal_paths()) if private else list(source_paths())) + [("data/study.sqlite3", db_snapshot)]
         names = [name for name, _ in entries]
         if len(names) != len(set(names)):
             raise ValueError("백업 항목 경로가 중복됩니다.")
-        manifest = {"format": 1, "created_at": datetime.now(timezone.utc).isoformat(),
+        manifest = {"format": PRIVATE_FORMAT if private else 1,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                     "model": app.MODEL, "counts": counts, "files": {}}
+        prefix = "" if private else PREFIX
         temporary_zip = Path(temp) / "backup.zip"
         with zipfile.ZipFile(temporary_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for name, path in entries:
                 data = path.read_bytes()
-                archive.writestr(PREFIX + name, data)
+                archive.writestr(prefix + name, data)
                 manifest["files"][name] = {"bytes": len(data), "sha256": digest(data)}
-            archive.writestr(PREFIX + "backup-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+            archive.writestr(prefix + "backup-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
         verify(temporary_zip)
         os.replace(temporary_zip, destination)
         destination.chmod(0o600)
@@ -92,21 +106,24 @@ def verify(archive_path):
         names = archive.namelist()
         if len(names) != len(set(names)):
             raise ValueError("백업 안에 중복 파일이 있습니다.")
-        manifest_name = PREFIX + "backup-manifest.json"
+        prefix = PREFIX if PREFIX + "backup-manifest.json" in names else ""
+        manifest_name = prefix + "backup-manifest.json"
         manifest = json.loads(archive.read(manifest_name))
-        if manifest.get("format") != 1:
+        if manifest.get("format") != (1 if prefix else PRIVATE_FORMAT):
             raise ValueError("지원하지 않는 백업 형식입니다.")
-        expected = {PREFIX + name for name in manifest["files"]} | {manifest_name}
+        expected = {prefix + name for name in manifest["files"]} | {manifest_name}
         if set(names) != expected:
             raise ValueError("백업 파일 목록이 기록과 다릅니다.")
         for name, info in manifest["files"].items():
             safe = Path(name)
             if safe.is_absolute() or ".." in safe.parts or (name.startswith(".env") and name != ".env.example") or name.startswith(".git/"):
                 raise ValueError(f"허용하지 않는 경로: {name}")
-            data = archive.read(PREFIX + name)
+            if not prefix and not (name == "data/study.sqlite3" or name.startswith("vault/") or name.startswith(".obsidian/")):
+                raise ValueError(f"개인 백업에 허용하지 않는 파일: {name}")
+            data = archive.read(prefix + name)
             if len(data) != info["bytes"] or digest(data) != info["sha256"]:
                 raise ValueError(f"손상된 파일: {name}")
-        if "data/study.sqlite3" not in manifest["files"] or "portable.py" not in manifest["files"]:
+        if "data/study.sqlite3" not in manifest["files"] or (prefix and "portable.py" not in manifest["files"]):
             raise ValueError("필수 파일이 없습니다.")
         return manifest
 
@@ -116,12 +133,16 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     exporting = commands.add_parser("export", help="이 PC에서 백업 생성")
     exporting.add_argument("output", nargs="?", help="저장 경로 (기본: 프로젝트 상위 폴더)")
+    private_export = commands.add_parser("export-private", help="GitHub 코드와 별도로 개인 학습 자료만 백업")
+    private_export.add_argument("output", nargs="?", help="저장 경로 (기본: 프로젝트 상위 폴더)")
     checking = commands.add_parser("verify", help="백업 해시 검증")
     checking.add_argument("archive")
     args = parser.parse_args()
-    if args.command == "export":
-        output = args.output or str(ROOT.parent / f"aws-clf-c02-practice-backup-{datetime.now():%Y%m%d-%H%M%S}.zip")
-        manifest = export(output)
+    if args.command in ("export", "export-private"):
+        private = args.command == "export-private"
+        label = "private" if private else "backup"
+        output = args.output or str(ROOT.parent / f"aws-clf-c02-practice-{label}-{datetime.now():%Y%m%d-%H%M%S}.zip")
+        manifest = export(output, private=private)
         print(f"백업 완료: {Path(output).expanduser().resolve()}")
     else:
         manifest = verify(args.archive)

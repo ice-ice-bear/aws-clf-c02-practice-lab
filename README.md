@@ -42,26 +42,28 @@ Obsidian 볼트 `vault/`는 앱을 처음 실행할 때 만들어집니다. 새 
 
 ## 다른 PC로 이전
 
-Git 저장소에는 문제은행과 개념 노트 생성 코드·초기 템플릿이 있습니다. **풀이 기록·세트 진행 위치·복습 일정·AI 해설 캐시**는 `data/study.sqlite3`, **개인 오답과 수정한 개념 노트·PDF·Obsidian 설정**은 `vault/`에 있습니다. 이 둘을 빠뜨리지 않도록 독립 실행 가능한 ZIP 백업을 만듭니다. 실행 중인 서버를 끄지 않아도 SQLite의 일관된 스냅샷을 저장합니다.
+GitHub 공개 저장소에는 코드·문제은행·초기 템플릿이 있습니다. **풀이 기록·세트 진행 위치·복습 일정·AI 해설 캐시**는 `data/study.sqlite3`, **개인 오답과 수정한 개념 노트·PDF·Obsidian 설정**은 `vault/`에 있습니다. 개인 자료만 별도 ZIP으로 묶으세요. 실행 중인 서버를 끄지 않아도 SQLite의 일관된 스냅샷을 저장합니다. 백업 이후의 풀이와 노트 수정은 그 ZIP에 포함되지 않습니다.
 
 ```sh
-python3 portable.py export
-python3 portable.py verify ../aws-clf-c02-practice-backup-YYYYMMDD-HHMMSS.zip
+python3 portable.py export-private
+python3 portable.py verify ../aws-clf-c02-practice-private-YYYYMMDD-HHMMSS.zip
 ```
 
-백업 ZIP은 프로젝트 상위 폴더에 만들어지며, 소스 코드·문제은행·학습 DB·볼트 전체와 파일별 SHA-256 검증 기록을 포함합니다. `portable.py export /path/to/external-drive/study-backup.zip`처럼 저장 위치를 지정할 수 있습니다. 개인 학습 내용과 PDF가 들어 있으므로 ZIP은 본인이 관리하는 저장소에만 보관하세요. `.env`와 API 키, Git 이력은 포함하지 않습니다. 새 PC에서 키를 다시 발급하거나 기존 키를 안전한 방법으로 전달해야 합니다.
+개인 ZIP은 프로젝트 상위 폴더에 만들어지며 학습 DB·볼트 전체·프로젝트 루트의 별도 `.obsidian/` 작업 공간 설정과 파일별 SHA-256 검증 기록을 포함합니다. `python3 portable.py export-private /path/to/external-drive/study-private.zip`처럼 저장 위치를 지정할 수 있습니다. 개인 학습 내용과 PDF가 들어 있으므로 ZIP은 본인이 관리하는 저장소에만 보관하세요. `.env`와 API 키, 코드, Git 이력은 포함하지 않습니다. 새 PC에서 키를 다시 발급하거나 기존 키를 안전한 방법으로 전달해야 합니다.
 
-새 PC에서는 ZIP을 원하는 폴더에 풀어 `aws-clf-c02-practice-lab` 폴더로 이동합니다. Python 3.10 이상을 설치한 뒤 아래처럼 확인하고 실행합니다.
+새 PC에서는 Python 3.10 이상을 설치하고 공개 저장소를 복제한 뒤, **서버를 처음 실행하기 전에** 개인 ZIP을 검증하고 복제 폴더에 풉니다.
 
 ```sh
-cd /path/to/aws-clf-c02-practice-lab
-python3 portable.py verify /path/to/study-backup.zip
+git clone https://github.com/ice-ice-bear/aws-clf-c02-practice-lab.git
+cd aws-clf-c02-practice-lab
+python3 portable.py verify /path/to/study-private.zip
+unzip /path/to/study-private.zip -d .
 cp .env.example .env
 # .env에 실제 OPENAI_API_KEY 입력. 이전 PC의 절대 경로 설정은 복사하지 않습니다.
 python3 app.py
 ```
 
-브라우저에서 <http://127.0.0.1:8765>를 열어 풀이 건수와 복습 목록을 확인하고, `vault`를 Obsidian에서 새 볼트로 엽니다. Git 작업을 이어가려면 새 폴더에서 이 공개 저장소를 다시 클론한 후 ZIP의 `data/study.sqlite3`와 `vault/`를 클론 폴더에 복사하세요. 클론 전에 서버를 실행하면 새 빈 DB가 만들어지므로, 이전 파일을 넣은 뒤 서버를 시작하는 것이 간단합니다. 이전 PC의 Obsidian 별칭 심볼릭 링크는 옮길 필요가 없습니다.
+브라우저에서 <http://127.0.0.1:8765>를 열어 풀이 건수와 복습 목록을 확인하고, `vault`를 Obsidian에서 새 볼트로 엽니다. 이전 PC의 Obsidian 별칭 심볼릭 링크는 옮길 필요가 없습니다. 공개 저장소 접속 없이 전체를 옮겨야 한다면 기존 `python3 portable.py export`로 코드까지 포함한 독립 ZIP을 만들 수 있습니다.
 
 ## 책과 저작권
 
