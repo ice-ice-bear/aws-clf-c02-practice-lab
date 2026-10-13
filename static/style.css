@@ -12,12 +12,18 @@
 .next-dock span{font-size:11px;color:var(--muted)}
 .next-dock .primary{min-width:148px;font-size:13px}
 .result h3{margin:0 0 9px}
-.answer-summary{scroll-margin-top:24px}
+.answer-summary{scroll-margin-top:24px;background:#edf7f4;border:1px solid #c9e5dc;border-left:4px solid var(--teal);border-radius:9px;padding:15px 17px;margin:14px 0 18px}
+.answer-summary-label{display:block;color:var(--teal-deep);font-size:11px;font-weight:700;letter-spacing:.04em;margin-bottom:9px}
+.answer-values{display:grid;gap:8px}
+.answer-value{display:flex;align-items:flex-start;gap:10px;font-size:15px;line-height:1.55;color:var(--ink)}
+.answer-value strong{font-weight:700}
+.answer-letter{flex:none;display:grid;place-items:center;width:25px;height:25px;border-radius:5px;background:var(--teal);color:#fff;font-size:12px;font-weight:700}
+.answer-summary .answer-description{margin:11px 0 0;color:#43616a;font-size:12px;line-height:1.65}
 .timing-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px}
 .timing-heading #timing-rule{grid-column:1/-1;grid-row:2;max-width:96ch;font-size:12px;line-height:1.6}
 .timing-heading #review-map-link{grid-column:2;grid-row:1}
 .result-row{margin-top:18px;gap:12px}
-.explanation{white-space:normal;padding:20px 23px;background:#f2f8f6;border-left:3px solid #7fc5b5;border-radius:6px;font-size:13px;line-height:1.75}
+.explanation{white-space:normal;padding:20px 23px;background:#f2f8f6;border-left:3px solid #7fc5b5;border-radius:6px;font-size:13px;line-height:1.75;scroll-margin-top:24px}
 .explanation-body>*:first-child{margin-top:0}
 .explanation-body>*:last-child{margin-bottom:0}
 .explanation-body h4{font-size:14px;line-height:1.45;color:var(--teal-deep);margin:20px 0 6px}
