@@ -6,8 +6,28 @@ function pauseTimer() { if(startedAt!==null){elapsedMs+=performance.now()-starte
 function resumeTimer() { if(current && !answered && currentView==='practice' && !document.hidden && startedAt===null) startedAt=performance.now(); }
 function answerSeconds() { pauseTimer(); return Math.min(1800,Math.max(1,Math.round(elapsedMs/1000))); }
 function formatTime(seconds) { const n=Math.round(seconds); return n<60?`${n}초`:`${Math.floor(n/60)}분 ${String(n%60).padStart(2,'0')}초`; }
-function nextButton(label='다음 문제', className='primary') {
-  const button=el('button',className,label);button.type='button';button.addEventListener('click',()=>loadQuestion());return button;
+function inlineMarkdown(parent, text) {
+  const pieces=text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g);
+  for(const piece of pieces){
+    if(piece.startsWith('**') && piece.endsWith('**'))parent.append(el('strong','',piece.slice(2,-2)));
+    else if(piece.startsWith('`') && piece.endsWith('`'))parent.append(el('code','',piece.slice(1,-1)));
+    else parent.append(document.createTextNode(piece));
+  }
+}
+function renderMarkdown(body) {
+  const container=el('div','explanation-body'), lines=body.replace(/\r\n?/g,'\n').split('\n');
+  let paragraph=[], list=null;
+  const flush=()=>{if(paragraph.length){const p=el('p');inlineMarkdown(p,paragraph.join(' '));container.append(p);paragraph=[];}};
+  for(const raw of lines){
+    const line=raw.trim();
+    if(!line){flush();list=null;continue;}
+    const heading=line.match(/^#{1,4}\s+(.+)$/);
+    if(heading){flush();list=null;const h=el('h4');inlineMarkdown(h,heading[1]);container.append(h);continue;}
+    const bullet=line.match(/^[-*]\s+(.+)$/);
+    if(bullet){flush();if(!list){list=el('ul');container.append(list);}const item=el('li');inlineMarkdown(item,bullet[1]);list.append(item);continue;}
+    list=null;paragraph.push(line);
+  }
+  flush();return container;
 }
 
 async function api(path, body) {
@@ -46,14 +66,15 @@ async function refreshStats() {
   if(!s.weak.length){list.append(el('div','empty-review','아직 취약 개념이 없습니다. 오답이나 오래 걸린 정답이 쌓이면 여기에 나타납니다.'));return;}
   for(const concept of s.weak){
     const item=el('article','weak-item'), left=el('div'), title=el('h3','',concept.title), desc=el('p','',concept.summary);
-    const link=el('a','', 'AWS 공식 자료 ↗');link.href=concept.url;link.target='_blank';link.rel='noreferrer';
+    const link=el('a','', 'Obsidian 개념 노트 열기 ↗');link.href=`obsidian://open?path=${encodeURIComponent(`${s.vault}/Concepts/${concept.id}.md`)}`;
     left.append(title,desc,link); const count=el('div','weak-count',`${concept.weak}회 다시 보기`);count.append(el('small','',`총 ${concept.attempts}회 풀이`));item.append(left,count);list.append(item);
   }
 }
 function renderQuestion() {
   const card=$('question-card');card.replaceChildren();
+  $('next').classList.toggle('hidden',Boolean(answered));
+  $('next-dock').classList.toggle('hidden',!answered || !current);
   if(!current){card.append(el('div','loading','이 조건에 맞는 문제가 없습니다. 모드나 회차를 바꿔 보세요.'));return;}
-  $('next').textContent=answered?'다음 문제':'문제 건너뛰기';
   const top=el('div','question-top'), badge=el('span','badge',current.concept.title), no=el('span','question-no',`EXAM ${String(current.exam).padStart(2,'0')} / Q${String(current.number).padStart(2,'0')}`);
   top.append(badge,no);card.append(top);
   if(current.needs_review){card.append(el('span','badge warn','현재 AWS 공식 자료 재확인 권장'));}
@@ -77,34 +98,37 @@ function renderQuestion() {
       }catch(error){resumeTimer();submit.disabled=false;submit.textContent='정답 확인';alert(error.message);}finally{loading=false;}};
     actions.append(hint,submit);card.append(actions);return;
   }
-  const result=el('div','result'), heading=el('div','result-heading'), title=el('h3',answered.is_correct?'good':'bad',answered.is_correct?'정답입니다':'다시 살펴볼 문제입니다');
-  title.tabIndex=-1;heading.append(title,nextButton());result.append(heading);
+  const result=el('div','result'), title=el('h3',answered.is_correct?'good':'bad',answered.is_correct?'정답입니다':'다시 살펴볼 문제입니다');
+  title.tabIndex=-1;result.append(title);
   const summary=el('p','',`문제은행 정답: ${answered.correct.join(', ')} · ${answered.offline_explanation}`);result.append(summary);
   const timing=answered.duration_seconds===null?'풀이 시간 미기록':`풀이 ${formatTime(answered.duration_seconds)} · 이 문제 평균 ${formatTime(answered.question_stats.avg_seconds)} (${answered.question_stats.attempts}회)`;
   const interpretation=answered.is_correct?(answered.confused?'반복 오답과 평균 풀이 시간이 높아 내일 다시 봅니다.':answered.slow?'오래 걸린 정답이라 내일 다시 봅니다.':'정답을 맞혀 복습 간격이 늘어났습니다.'):'오답이라 내일 다시 봅니다.';
   result.append(el('p','timing-feedback',`${timing} · ${interpretation}`));
-  const row=el('div','result-row'), official=el('a','', 'AWS 공식 근거 ↗'), source=el('a','', '문제 원본 ↗');
-  official.href=answered.concept.url;official.target='_blank';official.rel='noreferrer';source.href=answered.source_url;source.target='_blank';source.rel='noreferrer';
+  const row=el('div','result-row');
+  for(const source of answered.official_sources || []){
+    const link=el('a','',`${source.label} ↗`);link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);
+  }
   const explain=el('button','secondary','AI 비교 해설 요청');explain.onclick=async()=>{explain.disabled=true;explain.textContent='해설 생성 중…';
     try{const value=await api('/api/explain',{id:current.id,selected:[...selected],attempt_id:answered.attempt_id});
-      result.querySelector('.explanation')?.remove();const content=el('div','explanation',value.body);
+      result.querySelector('.explanation')?.remove();const content=el('div','explanation');content.append(renderMarkdown(value.body));
       if(value.note_relative){const saved=el('p','saved-review'), link=el('a','', 'Obsidian에서 오답 노트 열기');
         link.href=`obsidian://open?path=${encodeURIComponent(value.note_path)}`;
         saved.append('저장됨 · ',link,el('span','',` ${value.note_relative}`));content.append(saved);}
       result.append(content);
     }catch(error){result.querySelector('.explanation')?.remove();result.append(el('div','explanation',error.message));}
     finally{explain.disabled=false;explain.textContent='AI 비교 해설 다시 보기';}};
-  row.append(official,source,explain);result.append(row);
+  row.append(explain);result.append(row);
   const box=el('div','note-box'), label=el('label','', '내가 헷갈린 이유를 Obsidian에 남기기'), textarea=el('textarea');textarea.placeholder='예: CloudTrail과 CloudWatch의 역할을 반대로 기억했다.';
   const save=el('button','secondary','개념 노트에 저장');const msg=el('span','notice');
   save.onclick=async()=>{try{const r=await api('/api/save-note',{id:current.id,reason:textarea.value});msg.textContent=`저장됨: ${r.path}`;textarea.value='';}catch(error){msg.textContent=error.message;}};
   box.append(label,textarea,save,msg);result.append(box);
-  const footer=el('div','result-footer');footer.append(el('span','','검토를 마쳤다면 이어서 풀어보세요. (N 키)'),nextButton());result.append(footer);card.append(result);
+  card.append(result);
 }
 async function loadQuestion(questionId=null){
   if(loading)return;
   const shouldScroll=Boolean(current || questionId);
   loading=true;pauseTimer();
+  $('next-dock').classList.add('hidden');
   $('question-card').replaceChildren(el('div','loading','문제를 불러오는 중입니다…'));
   try{const query=new URLSearchParams({mode:$('mode').value});if($('exam').value)query.set('exam',$('exam').value);
     if(questionId)query.set('id',questionId);else if(current)query.set('exclude',current.id);
@@ -114,7 +138,7 @@ async function loadQuestion(questionId=null){
 }
 for(let i=1;i<=23;i++){const option=el('option','',`${i}회차`);option.value=i;$('exam').append(option);}
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>setView(button.dataset.view));
-$('next').onclick=()=>loadQuestion();$('mode').onchange=()=>loadQuestion();$('exam').onchange=()=>loadQuestion();
+$('next').onclick=()=>loadQuestion();$('next-answer').onclick=()=>loadQuestion();$('mode').onchange=()=>loadQuestion();$('exam').onchange=()=>loadQuestion();
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseTimer();else resumeTimer();});
 document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='n' && answered && currentView==='practice' && !event.repeat && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){event.preventDefault();loadQuestion();}});
 refreshStats().catch(console.error);loadQuestion();

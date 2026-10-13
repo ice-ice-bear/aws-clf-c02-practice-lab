@@ -1,6 +1,7 @@
 """Local CLF-C02 question practice and Obsidian review service (stdlib only)."""
 
 import argparse
+import html
 import json
 import math
 import os
@@ -18,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from concepts import BY_ID, CONCEPTS, as_dict, classify
 from knowledge import render_note
-from review_notes import init_review_map, save_ai_review
+from review_notes import init_review_map, save_ai_review, verified_sources
 
 ROOT = Path(__file__).resolve().parent
 
@@ -129,14 +130,21 @@ def init_vault():
     init_review_map(VAULT)
 
 
+def display_text(value):
+    """Turn source Markdown line breaks into readable text without interpreting HTML."""
+    return re.sub(r"<\s*/?\s*br\s*/?\s*>", "\n", html.unescape(value), flags=re.I).strip()
+
+
 def question_dict(row, reveal=False):
     q = {"id": row["id"], "exam": row["exam"], "number": row["number"],
-         "stem": row["stem"], "options": json.loads(row["options"]),
+         "stem": display_text(row["stem"]),
+         "options": {letter: display_text(value) for letter, value in json.loads(row["options"]).items()},
          "multiple": len(json.loads(row["correct"])) > 1,
          "concept": as_dict(BY_ID[row["concept_id"]]),
-         "source_url": row["source_url"], "needs_review": bool(row["needs_review"])}
+         "needs_review": bool(row["needs_review"])}
     if reveal:
         q["correct"] = json.loads(row["correct"])
+        q["official_sources"] = verified_sources(row["id"])
     return q
 
 
@@ -247,7 +255,7 @@ def stats():
                                    WHERE a.duration_seconds IS NOT NULL
                                    GROUP BY q.id HAVING COUNT(*) >= 3""").fetchall()
         confusing = [{"id": r["id"], "exam": r["exam"], "number": r["number"],
-                      "stem": r["stem"], "concept": as_dict(BY_ID[r["concept_id"]]),
+                      "stem": display_text(r["stem"]), "concept": as_dict(BY_ID[r["concept_id"]]),
                       "attempts": r["attempts"], "wrong_rate": round(r["wrong"] / r["attempts"], 2),
                       "avg_seconds": round(r["avg_seconds"])} for r in question_rows
                      if r["wrong"] / r["attempts"] >= .4 and r["avg_seconds"] >= threshold]
@@ -269,11 +277,11 @@ def extract_output(response):
 
 
 def concept_context(concept_id):
-    """Pass the authored study note, excluding personal mistakes, to the model."""
+    """Pass authored study content, excluding broad links and personal mistakes."""
     path = VAULT / "Concepts" / f"{concept_id}.md"
     if not path.exists():
         return as_dict(BY_ID[concept_id])["summary"]
-    return path.read_text(encoding="utf-8").split("## 내 오답", 1)[0][:5000]
+    return path.read_text(encoding="utf-8").split("## 근거와 더 읽기", 1)[0].split("## 내 오답", 1)[0][:5000]
 
 
 def explain(question_id, selected, attempt_id=None):
@@ -311,10 +319,10 @@ def explain(question_id, selected, attempt_id=None):
                   "'### 헷갈린 개념 구별', '### 다음 복습 질문'. "
                   "내가 고른 보기와 문제은행 정답이 왜 다른지 구체적인 서비스 기능과 문제의 결정적 단서로 비교하세요. "
                   "복수 선택이면 빠뜨린 정답과 잘못 선택한 보기를 모두 다루세요. 500~800자 내외.\n\n"
-                  f"문제: {q['stem']}\n보기: {q['options']}\n문제은행 정답: {q['correct']}\n학습자 선택: {selected}\n"
+                  f"문제: {display_text(q['stem'])}\n보기: {question_dict(q)['options']}\n문제은행 정답: {q['correct']}\n학습자 선택: {selected}\n"
                   f"카테고리: {concept['domain']}\n개념: {concept['title']}\n"
                   f"작성된 개념 노트 (PDF 본문과 개인 오답 제외):\n{concept_context(concept['id'])}\n"
-                  f"공식 근거 URL: {concept['url']}\n"
+                  f"문항별로 확인된 AWS 공식 자료: {verified_sources(question_id) or '없음'}\n"
                   f"문항 재검토 표시: {bool(q['needs_review'])}")
         payload = {"model": MODEL, "input": prompt, "reasoning": {"effort": "low"}, "max_output_tokens": 1200}
         request = urllib.request.Request("https://api.openai.com/v1/responses", data=json.dumps(payload).encode(),
@@ -389,6 +397,7 @@ class Handler(BaseHTTPRequestHandler):
         content = (ROOT / "static" / file).read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", {"index.html": "text/html; charset=utf-8", "app.js": "application/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8", "favicon.svg": "image/svg+xml"}[file])
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)

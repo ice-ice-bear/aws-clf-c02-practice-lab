@@ -7,6 +7,22 @@ import app
 
 
 class StudyFlowTest(unittest.TestCase):
+    def test_source_line_breaks_and_verified_question_links(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app.DB_PATH = Path(temp) / "study.sqlite3"
+            app.init_db()
+            broken = app.question_by_id("E13-Q04")
+            self.assertIn("\nWhich", broken["stem"])
+            self.assertNotIn("<br", broken["stem"])
+            self.assertEqual(app.display_text("one&lt;/br&gt;two"), "one\ntwo")
+            with app.connect() as db:
+                verified = db.execute("SELECT * FROM questions WHERE id='E21-Q15'").fetchone()
+                unrelated = db.execute("SELECT * FROM questions WHERE id='E01-Q04'").fetchone()
+            sources = app.question_dict(verified, reveal=True)["official_sources"]
+            self.assertTrue(sources)
+            self.assertTrue(all(source["url"].startswith(("https://docs.aws.amazon.com/", "https://aws.amazon.com/")) for source in sources))
+            self.assertEqual(app.question_dict(unrelated, reveal=True)["official_sources"], [])
+
     def test_import_grading_and_vault_write(self):
         with tempfile.TemporaryDirectory() as temp:
             app.DB_PATH = Path(temp) / "study.sqlite3"
@@ -29,6 +45,7 @@ class StudyFlowTest(unittest.TestCase):
             context = app.concept_context("resilience-scaling")
             self.assertIn("## 자주 틀리는 지점", context)
             self.assertNotIn("탄력성과 복원력을 혼동했다", context)
+            self.assertNotIn("## 근거와 더 읽기", context)
 
     def test_timing_distribution_and_confusing_question(self):
         with tempfile.TemporaryDirectory() as temp:

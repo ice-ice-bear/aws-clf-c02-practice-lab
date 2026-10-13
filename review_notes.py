@@ -25,6 +25,12 @@ VERIFIED_QUESTION_NOTES = {
         [("AWS Health 계정별 이벤트", "https://docs.aws.amazon.com/health/latest/ug/aws-health-account-views.html"),
          ("공개 이벤트와 계정별 이벤트", "https://docs.aws.amazon.com/health/latest/ug/about-public-events.html")],
     ),
+    "E21-Q15": (
+        "Storage Gateway는 온프레미스 애플리케이션이 AWS 클라우드 스토리지를 사용할 수 있게 연결합니다. "
+        "Direct Connect는 전용 네트워크 연결을 제공하므로 문제의 스토리지 기능과 구별합니다.",
+        [("Storage Gateway의 하이브리드 스토리지", "https://aws.amazon.com/storagegateway/"),
+         ("Direct Connect의 전용 네트워크 연결", "https://docs.aws.amazon.com/directconnect/latest/UserGuide/Welcome.html")],
+    ),
 }
 
 
@@ -58,6 +64,11 @@ def verified_block(question_id):
     summary, sources = verified
     links = "\n".join(f"- [{label}]({url})" for label, url in sources)
     return f"## 공식 자료 대조\n\n{summary}\n\n{links}\n\n"
+
+
+def verified_sources(question_id):
+    verified = VERIFIED_QUESTION_NOTES.get(question_id)
+    return [{"label": label, "url": url} for label, url in verified[1]] if verified else []
 
 
 def init_review_map(vault):
@@ -134,8 +145,7 @@ def save_ai_review(vault, question, attempt, body, model):
             f"- {wiki_link(vault / 'Concepts' / (concept['id'] + '.md'), vault, concept['title'])}\n"
             f"{chapter_links}\n"
             f"- [[References/{BOOK}#page={page}|학습서 PDF {page}쪽부터]]\n"
-            f"- [AWS 공식 문서]({concept['url']})\n"
-            f"- [문제은행 원본]({question['source_url']})\n"
+            "\n".join(f"- [{source['label']}]({source['url']})" for source in verified_sources(question['id'])) + "\n"
         )
         try:
             with path.open("x", encoding="utf-8") as out:
