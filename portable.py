@@ -16,7 +16,7 @@ import app
 ROOT = Path(__file__).resolve().parent
 PREFIX = "aws-clf-c02-practice-lab/"
 SOURCE_FILES = ("README.md", ".gitignore", ".env.example")
-SOURCE_DIRS = ("static", "tests")
+SOURCE_DIRS = ("static", "tests", "templates")
 DATA_FILES = ("data/questions.json", "data/UPSTREAM_LICENSE")
 
 

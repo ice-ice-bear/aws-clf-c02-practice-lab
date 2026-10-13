@@ -112,7 +112,11 @@ def init_vault():
     (VAULT / ".obsidian").mkdir(exist_ok=True)
     start = VAULT / "00-시작.md"
     if not start.exists():
-        start.write_text("# AWS Cloud Practitioner 학습\n\n이 볼트는 로컬 문제 풀이 서비스와 연결됩니다.\n\n## 학습 흐름\n\n1. 문제를 풀면 시간이 자동 기록됩니다.\n2. 틀렸거나 오래 걸린 개념의 공식 근거를 확인합니다.\n3. 내 오답 이유를 개념 노트에 저장합니다.\n4. 복습 화면에서 예정된 문제를 다시 풉니다.\n\n## 공식 기준\n\n- [CLF-C02 시험 가이드](https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/cloud-practitioner-02.html)\n- [시험 범위 내 서비스](https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/clf-02-in-scope-services.html)\n\n문제 원본은 kananinirav의 MIT 라이선스 자료입니다. 최신 AWS 문서와 충돌할 수 있는 문항은 별도로 표시됩니다.\n", encoding="utf-8")
+        start.write_text((ROOT / "templates" / "00-시작.md").read_text(encoding="utf-8"), encoding="utf-8")
+    reference = VAULT / "References" / "학습서-안내.md"
+    reference.parent.mkdir(exist_ok=True)
+    if not reference.exists():
+        reference.write_text((ROOT / "templates" / "References" / "학습서-안내.md").read_text(encoding="utf-8"), encoding="utf-8")
     for item in CONCEPTS:
         concept = as_dict(item)
         path = VAULT / "Concepts" / f"{concept['id']}.md"

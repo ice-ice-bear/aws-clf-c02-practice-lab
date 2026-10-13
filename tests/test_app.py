@@ -13,6 +13,7 @@ class StudyFlowTest(unittest.TestCase):
             app.VAULT = Path(temp) / "vault"
             app.init_db()
             app.init_vault()
+            self.assertTrue((app.VAULT / "References" / "학습서-안내.md").is_file())
             self.assertEqual(app.stats()["total"], 1142)
             with app.connect() as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM questions WHERE exam=13").fetchone()[0], 50)
