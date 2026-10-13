@@ -47,7 +47,8 @@ load_local_env(ROOT / ".env")
 DB_PATH = Path(os.environ.get("AWS_CCP_DB", ROOT / "data" / "study.sqlite3"))
 VAULT = Path(os.environ.get("AWS_CCP_VAULT", ROOT / "vault")).expanduser()
 MODEL = os.environ.get("AWS_CCP_MODEL", "gpt-6-luna")
-EXAM_PACE_SECONDS = round(90 * 60 / 65)
+OFFICIAL_QUESTION_COUNT = 65
+EXAM_PACE_SECONDS = round(90 * 60 / OFFICIAL_QUESTION_COUNT)
 DOMAIN_WEIGHTS = {"클라우드 개념": 24, "보안 및 규정 준수": 30,
                   "클라우드 기술 및 서비스": 34, "청구·요금·지원": 12}
 
@@ -210,11 +211,12 @@ def create_session(kind, exam=None, count=None):
             raise ValueError("Select a valid exam")
     elif exam is not None:
         raise ValueError("Exam is only used for exam sessions")
-    if kind in ("balanced", "due"):
-        if isinstance(count, bool) or not isinstance(count, int) or not 5 <= count <= 100:
-            raise ValueError("Select 5 to 100 questions")
+    if kind == "balanced":
+        if count is not None and count != OFFICIAL_QUESTION_COUNT:
+            raise ValueError("시험 비중 랜덤은 65문항으로 구성합니다")
+        count = OFFICIAL_QUESTION_COUNT
     elif count is not None:
-        raise ValueError("Count is only used for random or review sessions")
+        raise ValueError("문항 수는 시험 비중 랜덤에서만 사용합니다")
     with connect() as db:
         if kind == "exam":
             rows = db.execute("SELECT id FROM questions WHERE exam=? ORDER BY number", (exam,)).fetchall()
@@ -224,8 +226,8 @@ def create_session(kind, exam=None, count=None):
             ids = [row["id"] for row in rows]
         elif kind == "due":
             rows = db.execute("""SELECT q.id FROM questions q JOIN progress p ON p.question_id=q.id
-                                 WHERE p.due_at<=? ORDER BY p.due_at, RANDOM() LIMIT ?""",
-                              (now().isoformat(), count)).fetchall()
+                                 WHERE p.due_at<=? ORDER BY p.due_at, RANDOM()""",
+                              (now().isoformat(),)).fetchall()
             ids = [row["id"] for row in rows]
         else:
             rows = db.execute("""SELECT q.id, q.concept_id, p.question_id IS NULL AS unseen

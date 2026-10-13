@@ -17,7 +17,7 @@ class StudyFlowTest(unittest.TestCase):
             self.assertEqual(app.stats()["studied"], 1)
             self.assertEqual(app.session_details(exam["id"])["question"]["id"], "E12-Q02")
             self.assertEqual(app.advance_session(exam["id"], "E12-Q02")["question"]["id"], "E12-Q03")
-            balanced = app.create_session("balanced", count=65)
+            balanced = app.create_session("balanced")
             with app.connect() as db:
                 domains = db.execute("""SELECT q.concept_id FROM session_items si
                                         JOIN questions q ON q.id=si.question_id WHERE si.session_id=?""",
@@ -31,9 +31,8 @@ class StudyFlowTest(unittest.TestCase):
             self.assertEqual(app.session_details(exam["id"])["question"]["id"], "E12-Q03")
             app.activate_session(exam["id"])
             self.assertEqual(app.session_details()["id"], exam["id"])
-            self.assertEqual(app.create_session("balanced", count=17)["total"], 17)
-            with self.assertRaisesRegex(ValueError, "5 to 100"):
-                app.create_session("balanced", count=101)
+            with self.assertRaisesRegex(ValueError, "65문항"):
+                app.create_session("balanced", count=20)
             self.assertEqual(first["attempt_id"], 1)
 
     def test_due_session_uses_only_due_questions(self):
@@ -41,12 +40,12 @@ class StudyFlowTest(unittest.TestCase):
             app.DB_PATH = Path(temp) / "study.sqlite3"
             app.init_db()
             with self.assertRaisesRegex(ValueError, "맞는 문제가 없습니다"):
-                app.create_session("due", count=10)
+                app.create_session("due")
             app.submit_answer("E01-Q01", ["A"], 35)
             with app.connect() as db:
                 db.execute("UPDATE progress SET due_at=? WHERE question_id='E01-Q01'",
                            ((app.now() - app.timedelta(days=1)).isoformat(),))
-            due = app.create_session("due", count=10)
+            due = app.create_session("due")
             self.assertEqual((due["total"], due["question"]["id"]), (1, "E01-Q01"))
             app.submit_answer("E01-Q01", ["A"], 22, due["id"])
             finished = app.advance_session(due["id"], "E01-Q01")

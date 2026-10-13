@@ -30,7 +30,7 @@
         <div class="section-head"><div><span class="eyebrow">PRACTICE SESSION</span><h2>오늘 풀 범위를 정하세요</h2></div><p>한 문제만 풀어도 오답과 풀이 시간이 복습 기록에 반영됩니다.</p></div>
         <div id="session-setup" class="session-setup hidden">
           <div class="setup-heading"><div><h3>새 문제 세트</h3><p>범위가 정해지면 중간에 멈춰도 이어서 풀 수 있습니다.</p></div><button id="resume-session" class="secondary hidden" type="button">이어서 풀기</button></div>
-          <div class="controls"><label>풀이 방식<select id="session-kind"><option value="exam">회차별 모의고사</option><option value="balanced">시험 비중 랜덤</option><option value="due">복습 예정</option><option value="all">전체 문제</option></select></label><label id="exam-field">모의고사 회차<select id="exam"></select></label><label id="count-field" class="hidden">문항 수 (5~100)<input id="count" type="number" min="5" max="100" step="1" value="20" inputmode="numeric"></label><button id="start-session" class="primary" type="button">세트 시작</button></div>
+          <div class="controls"><label>풀이 방식<select id="session-kind"><option value="exam">회차별 모의고사</option><option value="balanced">시험 비중 랜덤 · 65문항</option><option value="due">복습 예정</option><option value="all">전체 문제</option></select></label><label id="exam-field">모의고사 회차<select id="exam"></select></label><button id="start-session" class="primary" type="button">세트 시작</button></div>
           <p id="session-help" class="setup-help">원본 모의고사 순서대로 풉니다. 이 문제은행은 공식 기출이 아닌 제3자 연습 자료입니다.</p>
           <p id="session-error" class="setup-error" role="alert"></p>
           <div id="recent-sessions" class="recent-sessions hidden"><h4>최근 세트</h4><div id="recent-session-list"></div></div>

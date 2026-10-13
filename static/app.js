@@ -169,11 +169,10 @@ function renderSessionChrome() {
 function updateSetup() {
   const kind=$('session-kind').value;
   $('exam-field').classList.toggle('hidden',kind!=='exam');
-  $('count-field').classList.toggle('hidden',!['balanced','due'].includes(kind));
   $('session-help').textContent={
     exam:'원본 모의고사 순서대로 풉니다. 이 문제은행은 공식 기출이 아닌 제3자 연습 자료입니다.',
-    balanced:'CLF-C02 채점 영역 비중 24% · 30% · 34% · 12%에 가깝게 섞습니다. 65문항은 실제 시험 길이이며, 영역 분류는 근사치입니다.',
-    due:'오늘 복습할 문제에서 선택합니다. 예정된 문제가 적으면 그 수만큼만 세트를 만듭니다.',
+    balanced:'공식 시험과 같은 65문항을 CLF-C02 영역 비중 24% · 30% · 34% · 12%에 가깝게 섞습니다. 영역 분류는 근사치입니다.',
+    due:'오늘 복습할 문제를 모두 한 세트로 묶습니다.',
     all:'문제은행 전체를 회차 순서대로 풉니다. 언제든 중단하고 이어서 풀 수 있습니다.'
   }[kind];
 }
@@ -206,8 +205,7 @@ async function startSession() {
   if(loading)return;loading=true;$('session-error').textContent='';$('start-session').disabled=true;
   const kind=$('session-kind').value;
   try{const value=await api('/api/session',{kind,
-    ...(kind==='exam'?{exam:Number($('exam').value)}:{}),
-    ...(['balanced','due'].includes(kind)?{count:Number($('count').value)}:{})});
+    ...(kind==='exam'?{exam:Number($('exam').value)}:{})});
     applySession(value.session,true);
   }catch(error){$('session-error').textContent=error.message;}
   finally{loading=false;$('start-session').disabled=false;}
