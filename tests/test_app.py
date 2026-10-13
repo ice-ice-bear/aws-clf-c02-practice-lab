@@ -2,11 +2,42 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import app
 
 
 class StudyFlowTest(unittest.TestCase):
+    def test_selected_concept_and_explanation_questions_save_to_obsidian(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app.DB_PATH = Path(temp) / "study.sqlite3"
+            app.VAULT = Path(temp) / "vault"
+            app.init_db()
+            app.init_vault()
+            concepts = app.study_concepts()
+            iam = next(item for item in concepts if item["id"] == "iam")
+            self.assertIn("최소 권한", iam["body"])
+            self.assertNotIn("내 오답", iam["body"])
+            self.assertNotIn("tags:", iam["body"])
+            with patch.object(app, "request_study_answer", return_value={"body": "### 핵심\n역할을 사용합니다.", "model": app.MODEL}) as request:
+                app.ask_concept("iam", "역할은 임시 자격 증명", "액세스 키와 다른 점은?")
+                self.assertIn("IAM과 최소 권한", request.call_args.args[0])
+                app.ask_explanation("E21-Q15", "스토리지 연결", "Direct Connect와 차이는?", "기존 AI 해설")
+                prompt = request.call_args.args[0]
+                self.assertIn("E21-Q15", prompt)
+                self.assertIn("기존 AI 해설", prompt)
+                self.assertIn("Direct Connect와 차이는?", prompt)
+            saved = app.save_study_question("explanation", "E21-Q15", "ai", "스토리지 연결",
+                                            "Direct Connect와 차이는?", "### 핵심\nStorage Gateway를 씁니다.", app.MODEL)
+            note = Path(saved["path"])
+            self.assertIn("Questions/migration/", saved["relative"])
+            self.assertIn("chapters: [4, 10]", note.read_text(encoding="utf-8"))
+            self.assertIn("[[Concepts/migration", note.read_text(encoding="utf-8"))
+            self.assertIn(note.stem, (app.VAULT / "Questions" / "00-질문-목록.md").read_text(encoding="utf-8"))
+            self.assertIn("학습 질문 목록", (app.VAULT / "00-시작.md").read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ValueError, "Invalid explanation source"):
+                app.save_study_question("explanation", "E21-Q15", "other", "선택", "질문", "답", app.MODEL)
+
     def test_exam_and_balanced_sessions_resume_without_finishing_bank(self):
         with tempfile.TemporaryDirectory() as temp:
             app.DB_PATH = Path(temp) / "study.sqlite3"

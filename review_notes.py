@@ -52,6 +52,42 @@ def append_once(path, link):
             out.write(f"- {link}\n")
 
 
+def save_study_qa(vault, concept, selected_text, question, answer, model, created_at,
+                  source_kind="concept", source_question=None):
+    """Keep each saved follow-up beside its concept and index it for review."""
+    if source_kind not in ("concept", "source", "ai"):
+        raise ValueError("Invalid question source")
+    folder = vault / "Questions" / concept["id"]
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{created_at:%Y%m%d-%H%M%S-%f}.md"
+    chapters, _, _ = chapter_refs(concept["id"])
+    metadata = {
+        "tags": ["aws-ccp", "clf-c02", "study-question"],
+        "concept_id": concept["id"], "domain": concept["domain"],
+        "chapters": chapters, "source": source_kind,
+        "model": model, "created_at": created_at.isoformat(),
+    }
+    if source_question is not None:
+        metadata["question_id"] = source_question["id"]
+    frontmatter = "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in metadata.items())
+    heading = f"{source_question['id']} · 해설 추가 질문" if source_question is not None else f"{concept['title']} · 개념 질문"
+    problem = f"## 문제\n\n{source_question['stem']}\n\n" if source_question is not None else ""
+    quote = selected_text.replace("\n", "\n> ")
+    path.write_text(
+        f"---\n{frontmatter}\n---\n\n# {heading}\n\n{problem}"
+        f"## 선택한 내용\n\n> {quote}\n\n"
+        f"## 내 질문\n\n{question}\n\n## AI 답변\n\n{answer}\n\n"
+        f"## 다시 구별하기\n\n- 내 말로 한 줄: \n- 다음에 볼 단서: \n\n"
+        f"## 연결\n\n- [[Concepts/{concept['id']}|{concept['title']}]]\n",
+        encoding="utf-8",
+    )
+    index = vault / "Questions" / "00-질문-목록.md"
+    create_index(index, "학습 질문 목록", "개념과 문제 해설을 읽으며 AI에게 물어보고 저장한 질문입니다.")
+    label = question.replace("|", " ").replace("[", "").replace("]", "")[:50]
+    append_once(index, wiki_link(path, vault, f"{concept['title']} · {label}"))
+    return path
+
+
 def chapter_index(vault, number):
     title = CHAPTERS[number][0]
     return vault / "Review" / "Chapters" / f"{number:02d}장 {title}.md"

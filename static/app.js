@@ -2,35 +2,12 @@ const $ = id => document.getElementById(id);
 let current = null, selected = new Set(), answered = null, currentView = 'practice';
 let elapsedMs = 0, startedAt = null, loading = false;
 let session = null, adHoc = false, setupOpen = false;
+let concepts = [], activeConcept = null, qaContext = null, qaResponse = null, currentAiExplanation = '';
 
 function pauseTimer() { if(startedAt!==null){elapsedMs+=performance.now()-startedAt;startedAt=null;} }
 function resumeTimer() { if(current && !answered && currentView==='practice' && !document.hidden && startedAt===null) startedAt=performance.now(); }
 function answerSeconds() { pauseTimer(); return Math.min(1800,Math.max(1,Math.round(elapsedMs/1000))); }
 function formatTime(seconds) { const n=Math.round(seconds); return n<60?`${n}초`:`${Math.floor(n/60)}분 ${String(n%60).padStart(2,'0')}초`; }
-function inlineMarkdown(parent, text) {
-  const pieces=text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g);
-  for(const piece of pieces){
-    if(piece.startsWith('**') && piece.endsWith('**'))parent.append(el('strong','',piece.slice(2,-2)));
-    else if(piece.startsWith('`') && piece.endsWith('`'))parent.append(el('code','',piece.slice(1,-1)));
-    else parent.append(document.createTextNode(piece));
-  }
-}
-function renderMarkdown(body) {
-  const container=el('div','explanation-body'), lines=body.replace(/\r\n?/g,'\n').split('\n');
-  let paragraph=[], list=null;
-  const flush=()=>{if(paragraph.length){const p=el('p');inlineMarkdown(p,paragraph.join(' '));container.append(p);paragraph=[];}};
-  for(const raw of lines){
-    const line=raw.trim();
-    if(!line){flush();list=null;continue;}
-    const heading=line.match(/^#{1,4}\s+(.+)$/);
-    if(heading){flush();list=null;const h=el('h4');inlineMarkdown(h,heading[1]);container.append(h);continue;}
-    const bullet=line.match(/^[-*]\s+(.+)$/);
-    if(bullet){flush();if(!list){list=el('ul');container.append(list);}const item=el('li');inlineMarkdown(item,bullet[1]);list.append(item);continue;}
-    list=null;paragraph.push(line);
-  }
-  flush();return container;
-}
-
 async function api(path, body) {
   const options = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
   const response = await fetch(path, options);
@@ -42,14 +19,45 @@ function el(tag, className, text) { const node=document.createElement(tag); if(c
 function setView(view) {
   pauseTimer();
   currentView=view;
-  for (const name of ['practice','review','guide']) $(name+'-view').classList.toggle('hidden',name!==view);
+  for (const name of ['practice','concepts','review','guide']) $(name+'-view').classList.toggle('hidden',name!==view);
   document.querySelectorAll('.nav').forEach(button=>button.classList.toggle('active',button.dataset.view===view));
-  $('page-title').textContent={practice:'오늘의 연습',review:'취약 개념',guide:'학습 안내'}[view];
+  $('page-title').textContent={practice:'오늘의 연습',concepts:'개념 학습',review:'취약 개념',guide:'학습 안내'}[view];
   if(view==='review') refreshStats();
+  $('ask-selection').classList.add('hidden');
   resumeTimer();
+}
+function renderConcept(concept) {
+  activeConcept=concept;qaContext=null;$('ask-selection').classList.add('hidden');
+  $('concept-picker').value=concept.id;
+  document.querySelectorAll('.concept-item').forEach(button=>button.classList.toggle('active',button.dataset.id===concept.id));
+  const reader=$('concept-reader');reader.replaceChildren();
+  const heading=el('header','concept-heading');
+  const title=el('div');title.append(el('span','badge',concept.domain),el('h2','',concept.title));
+  const open=el('a','secondary concept-open','Obsidian에서 열기');
+  open.href=`obsidian://open?path=${encodeURIComponent(`${studyVault}/Concepts/${concept.id}.md`)}`;
+  heading.append(title,open);reader.append(heading);
+  const body=el('div','concept-body');body.append(renderMarkdown(concept.body));reader.append(body);
+}
+let studyVault = '';
+async function initConcepts() {
+  const value=await api('/api/study-concepts');concepts=value.concepts;
+  const list=$('concept-list'),picker=$('concept-picker');list.replaceChildren();picker.replaceChildren();
+  for(const domain of [...new Set(concepts.map(item=>item.domain))]){
+    const group=el('div','concept-group');group.append(el('h3','',domain));
+    const optionGroup=el('optgroup');optionGroup.label=domain;
+    for(const concept of concepts.filter(item=>item.domain===domain)){
+      const button=el('button','concept-item',concept.title);button.type='button';button.dataset.id=concept.id;
+      button.onclick=()=>renderConcept(concept);group.append(button);
+      const option=el('option','',concept.title);option.value=concept.id;optionGroup.append(option);
+    }
+    list.append(group);picker.append(optionGroup);
+  }
+  picker.onchange=()=>renderConcept(concepts.find(item=>item.id===picker.value));
+  if(concepts.length)renderConcept(concepts[0]);
 }
 async function refreshStats() {
   const s=await api('/api/stats');
+  studyVault=s.vault;
   $('stat-total').textContent=s.total.toLocaleString(); $('stat-studied').textContent=s.studied.toLocaleString();
   $('stat-attempts').textContent=`풀이 기록 ${s.attempts}회`; $('stat-due').textContent=s.due;
   $('vault-path').textContent=`Obsidian 볼트: ${s.vault} · AI 해설: ${s.api_ready ? s.model+' 연결 준비됨' : 'API 키 설정 필요'}`;
@@ -75,6 +83,7 @@ async function refreshStats() {
 }
 function renderQuestion() {
   const card=$('question-card');card.replaceChildren();
+  $('ask-selection').classList.add('hidden');qaContext=null;
   renderSessionChrome();
   $('next-dock').classList.toggle('hidden',!answered || !current);
   $('next-answer').textContent=adHoc?'세트로 돌아가기':session?.position===session?.total?'결과 보기':'다음 문제';
@@ -133,7 +142,8 @@ function renderQuestion() {
   const explanationSlot=el('div','explanation-slot');explanationSlot.setAttribute('aria-live','polite');
   const explain=el('button','secondary','AI 비교 해설 요청');explain.onclick=async()=>{const questionId=current.id,attemptId=answered.attempt_id;explain.disabled=true;explain.textContent='해설 생성 중…';
     try{const value=await api('/api/explain',{id:current.id,selected:[...selected],attempt_id:answered.attempt_id});
-      const content=el('div','explanation');content.append(renderMarkdown(value.body));
+      currentAiExplanation=value.body;
+      const content=el('div','explanation explanation-context');content.append(renderMarkdown(value.body));
       if(value.note_relative){const saved=el('p','saved-review'), link=el('a','', 'Obsidian에서 오답 노트 열기');
         link.href=`obsidian://open?path=${encodeURIComponent(value.note_path)}`;
         saved.append('저장됨 · ',link,el('span','',` ${value.note_relative}`));content.append(saved);}
@@ -190,7 +200,7 @@ async function refreshSessionList() {
 }
 function applySession(value, shouldScroll=false) {
   pauseTimer();session=value;adHoc=false;setupOpen=!session;current=session?.question || null;
-  selected=new Set();answered=null;elapsedMs=0;startedAt=null;renderQuestion();resumeTimer();
+  selected=new Set();answered=null;currentAiExplanation='';elapsedMs=0;startedAt=null;renderQuestion();resumeTimer();
   if(shouldScroll)$('question-card').scrollIntoView({block:'start',behavior:'auto'});
 }
 async function loadSession(sessionId=null) {
@@ -224,17 +234,78 @@ async function advanceQuestion() {
 async function loadQuestion(questionId){
   if(loading)return;loading=true;pauseTimer();
   try{const value=await api(`/api/next?id=${encodeURIComponent(questionId)}`);
-    adHoc=true;current=value.question;selected=new Set();answered=null;elapsedMs=0;startedAt=null;
+    adHoc=true;current=value.question;selected=new Set();answered=null;currentAiExplanation='';elapsedMs=0;startedAt=null;
     renderQuestion();resumeTimer();$('question-card').scrollIntoView({block:'start',behavior:'auto'});
   }catch(error){$('question-card').replaceChildren(el('div','loading',error.message));}
   finally{loading=false;}
 }
+function captureStudySelection() {
+  const selection=document.getSelection();
+  if(!selection || selection.isCollapsed || !selection.rangeCount){$('ask-selection').classList.add('hidden');return;}
+  const range=selection.getRangeAt(0), node=range.commonAncestorContainer;
+  const target=node.nodeType===Node.TEXT_NODE?node.parentElement:node;
+  const text=selection.toString().trim();
+  if(text.length<2){$('ask-selection').classList.add('hidden');return;}
+  if(currentView==='concepts' && activeConcept && $('concept-reader').contains(target)){
+    qaContext={kind:'concept',id:activeConcept.id,selection:text.slice(0,4000)};
+    $('ask-selection').textContent='선택 문장 AI에게 질문';$('ask-selection').classList.remove('hidden');return;
+  }
+  const explanation=target.closest?.('.answer-summary, .explanation-context');
+  if(currentView==='practice' && answered && current && explanation){
+    const ai=Boolean(explanation.closest('.explanation-context'));
+    qaContext={kind:'explanation',id:current.id,source:ai?'ai':'source',selection:text.slice(0,4000),ai_context:currentAiExplanation};
+    $('ask-selection').textContent='선택한 해설에 추가 질문';$('ask-selection').classList.remove('hidden');return;
+  }
+  $('ask-selection').classList.add('hidden');
+}
+function openStudyQuestion() {
+  if(!qaContext)return;
+  const explanation=qaContext.kind==='explanation';
+  $('qa-eyebrow').textContent=explanation?'EXPLANATION Q&A':'CONCEPT Q&A';
+  $('qa-title').textContent=explanation?'선택한 해설에 추가 질문':'선택한 내용 질문하기';
+  $('qa-question').placeholder=explanation?'예: 이 설명은 다른 보기와 어떻게 구별되나요?':'예: 이 개념은 시험에서 어떤 보기와 자주 헷갈리나요?';
+  $('qa-selection').textContent=qaContext.selection;
+  $('qa-question').value='';$('qa-question').disabled=false;$('qa-status').textContent='';
+  $('qa-ask').disabled=false;
+  $('qa-answer').replaceChildren();$('qa-answer').classList.add('hidden');$('qa-save-row').classList.add('hidden');
+  $('qa-save').disabled=false;$('qa-save').textContent='질문과 답변을 Obsidian에 저장';qaResponse=null;
+  $('concept-qa-dialog').showModal();$('qa-question').focus();
+}
+async function askStudyQuestion() {
+  const question=$('qa-question').value.trim();
+  if(!question){$('qa-status').textContent='질문을 입력하세요.';return;}
+  const button=$('qa-ask');button.disabled=true;button.textContent='답변 생성 중…';$('qa-status').textContent='';
+  try{
+    const concept=qaContext.kind==='concept';
+    const endpoint=concept?'/api/ask-concept':'/api/ask-explanation';
+    const payload=concept?{concept_id:qaContext.id,selection:qaContext.selection,question}:
+      {id:qaContext.id,selection:qaContext.selection,question,ai_context:qaContext.ai_context};
+    qaResponse=await api(endpoint,payload);
+    $('qa-answer').replaceChildren(renderMarkdown(qaResponse.body));$('qa-answer').classList.remove('hidden');
+    $('qa-save-row').classList.remove('hidden');$('qa-question').disabled=true;
+  }catch(error){$('qa-status').textContent=error.message;}
+  finally{button.disabled=Boolean(qaResponse);button.textContent='AI에게 질문';}
+}
+async function saveStudyQuestion() {
+  if(!qaResponse || !qaContext)return;
+  const button=$('qa-save');button.disabled=true;$('qa-status').textContent='';
+  try{
+    const value=await api('/api/save-study-qa',{
+      kind:qaContext.kind,id:qaContext.id,source:qaContext.source||'concept',selection:qaContext.selection,
+      question:$('qa-question').value.trim(),answer:qaResponse.body,model:qaResponse.model,
+    });
+    $('qa-status').textContent=`Obsidian 저장 완료 · ${value.relative}`;button.textContent='저장됨';
+  }catch(error){$('qa-status').textContent=error.message;button.disabled=false;}
+}
 for(let i=1;i<=23;i++){const option=el('option','',`${i}회차`);option.value=i;$('exam').append(option);}
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>setView(button.dataset.view));
+$('ask-selection').onclick=openStudyQuestion;$('qa-ask').onclick=askStudyQuestion;$('qa-save').onclick=saveStudyQuestion;
+document.addEventListener('selectionchange',captureStudySelection);
+$('concept-qa-dialog').addEventListener('close',()=>{qaContext=null;$('ask-selection').classList.add('hidden');document.getSelection()?.removeAllRanges();});
 $('next').onclick=advanceQuestion;$('next-answer').onclick=advanceQuestion;
 $('session-kind').onchange=updateSetup;$('start-session').onclick=startSession;
 $('new-session').onclick=()=>{setupOpen=true;renderSessionChrome();refreshSessionList().catch(console.error);$('session-setup').scrollIntoView({block:'start'});};
 $('resume-session').onclick=()=>{setupOpen=false;renderSessionChrome();$('question-card').scrollIntoView({block:'start'});};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseTimer();else resumeTimer();});
 document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='n' && answered && currentView==='practice' && !event.repeat && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){event.preventDefault();advanceQuestion();}});
-updateSetup();refreshStats().catch(console.error);loadSession();
+updateSetup();Promise.all([refreshStats().then(initConcepts),loadSession()]).catch(console.error);

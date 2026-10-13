@@ -14,6 +14,7 @@
       <div class="brand"><div class="brand-mark">☁</div><div><strong>Cloud Practice</strong><small>CLF-C02 STUDY DESK</small></div></div>
       <nav aria-label="학습 메뉴">
         <button class="nav active" data-view="practice">◉ <span>문제 풀기</span></button>
+        <button class="nav" data-view="concepts">▣ <span>개념 학습</span></button>
         <button class="nav" data-view="review">▤ <span>취약 개념</span></button>
         <button class="nav" data-view="guide">◈ <span>학습 안내</span></button>
       </nav>
@@ -39,6 +40,14 @@
         <article class="question-card" id="question-card"><div class="loading">학습 내역을 불러오는 중입니다…</div></article>
         <div id="next-dock" class="next-dock hidden"><span>정답을 확인했다면 계속 풀어보세요.</span><button id="next-answer" class="primary" type="button">다음 문제</button></div>
       </section>
+      <section id="concepts-view" class="view hidden">
+        <div class="section-head"><div><span class="eyebrow">CONCEPT LIBRARY</span><h2>개념을 먼저 익혀보세요</h2></div><p>본문을 드래그하면 선택한 내용에 대해 AI에게 질문할 수 있습니다.</p></div>
+        <div class="concept-layout">
+          <aside class="concept-catalog" aria-label="개념 목차"><div id="concept-list"></div></aside>
+          <label class="concept-mobile">개념 선택<select id="concept-picker"></select></label>
+          <article id="concept-reader" class="concept-reader"><div class="loading">개념 노트를 불러오는 중입니다…</div></article>
+        </div>
+      </section>
       <section id="review-view" class="view hidden">
         <div class="section-head"><div><span class="eyebrow">REVIEW MAP</span><h2>다시 볼 문제와 개념</h2></div><p>오답과 풀이 시간의 분포를 함께 봅니다.</p></div>
         <div class="review-heading timing-heading"><h3>헷갈리는 문제</h3><p id="timing-rule"></p><a id="review-map-link" href="#">Obsidian 오답 지도 열기</a></div>
@@ -48,11 +57,22 @@
       </section>
       <section id="guide-view" class="view hidden">
         <div class="section-head"><div><span class="eyebrow">YOUR STUDY SYSTEM</span><h2>학습 공간 사용법</h2></div></div>
-        <div class="guide-grid"><div class="guide-card"><b>01 · 풀기</b><p>회차별, 시험 비중 랜덤, 복습 예정, 전체 문제 중 범위를 고르세요. 답을 제출하면 풀이 시간이 기록되고 중간에 멈춰도 이어서 풀 수 있습니다.</p></div><div class="guide-card"><b>02 · 비교하기</b><p>오답이나 오래 걸린 정답에 AI 비교 해설을 요청하면 Obsidian의 장·카테고리별 오답 노트에 저장됩니다.</p></div><div class="guide-card"><b>03 · 남기기</b><p>내가 틀린 이유를 쓰면 Obsidian 볼트의 해당 개념 노트에 추가됩니다.</p></div></div>
+        <div class="guide-grid"><div class="guide-card"><b>01 · 풀기</b><p>회차별, 시험 비중 랜덤, 복습 예정, 전체 문제 중 범위를 고르세요. 답을 제출하면 풀이 시간이 기록되고 중간에 멈춰도 이어서 풀 수 있습니다.</p></div><div class="guide-card"><b>02 · 비교하기</b><p>오답이나 오래 걸린 정답에 AI 비교 해설을 요청하면 Obsidian의 장·카테고리별 오답 노트에 저장됩니다.</p></div><div class="guide-card"><b>03 · 질문하고 남기기</b><p>개념 노트나 채점 후 해설을 드래그해 AI에게 질문하세요. 답변은 확인 후 Obsidian에 저장할 수 있습니다.</p></div></div>
         <div class="guide-note"><b>공식 기준</b><p>이 문제은행은 제3자 연습 자료입니다. 오래된 지원 플랜·서비스 명칭이 포함될 수 있으므로 표시된 문항은 공식 자료를 확인하세요.</p><a href="https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/cloud-practitioner-02.html" target="_blank" rel="noreferrer">CLF-C02 시험 가이드 열기 ↗</a><p id="vault-path"></p></div>
       </section>
     </main>
   </div>
+  <button id="ask-selection" class="ask-selection hidden" type="button">선택 문장 AI에게 질문</button>
+  <dialog id="concept-qa-dialog" class="concept-qa-dialog" aria-labelledby="qa-title">
+    <form method="dialog" class="dialog-head"><div><span id="qa-eyebrow" class="eyebrow">STUDY Q&amp;A</span><h2 id="qa-title">선택한 내용 질문하기</h2></div><button class="dialog-close" aria-label="닫기">×</button></form>
+    <blockquote id="qa-selection"></blockquote>
+    <label for="qa-question">궁금한 점</label>
+    <textarea id="qa-question" maxlength="1000" placeholder="예: 이 서비스는 어떤 보기와 자주 헷갈리나요?"></textarea>
+    <div class="qa-actions"><button id="qa-ask" class="primary" type="button">AI에게 질문</button><span id="qa-status" class="notice" role="status"></span></div>
+    <div id="qa-answer" class="qa-answer hidden" aria-live="polite"></div>
+    <div id="qa-save-row" class="qa-actions hidden"><button id="qa-save" class="secondary" type="button">질문과 답변을 Obsidian에 저장</button></div>
+  </dialog>
+  <script src="/markdown.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
