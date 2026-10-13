@@ -12,6 +12,7 @@
 .next-dock span{font-size:11px;color:var(--muted)}
 .next-dock .primary{min-width:148px;font-size:13px}
 .result h3{margin:0 0 9px}
+.answer-summary{scroll-margin-top:24px}
 .result-row{margin-top:18px;gap:12px}
 .explanation{white-space:normal;padding:20px 23px;background:#f2f8f6;border-left:3px solid #7fc5b5;border-radius:6px;font-size:13px;line-height:1.75}
 .explanation-body>*:first-child{margin-top:0}

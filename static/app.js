@@ -100,24 +100,27 @@ function renderQuestion() {
   }
   const result=el('div','result'), title=el('h3',answered.is_correct?'good':'bad',answered.is_correct?'정답입니다':'다시 살펴볼 문제입니다');
   title.tabIndex=-1;result.append(title);
-  const summary=el('p','',`문제은행 정답: ${answered.correct.join(', ')} · ${answered.offline_explanation}`);result.append(summary);
+  const summary=el('p','answer-summary',`문제은행 정답: ${answered.correct.join(', ')} · ${answered.offline_explanation}`);result.append(summary);
   const timing=answered.duration_seconds===null?'풀이 시간 미기록':`풀이 ${formatTime(answered.duration_seconds)} · 이 문제 평균 ${formatTime(answered.question_stats.avg_seconds)} (${answered.question_stats.attempts}회)`;
   const interpretation=answered.is_correct?(answered.confused?'반복 오답과 평균 풀이 시간이 높아 내일 다시 봅니다.':answered.slow?'오래 걸린 정답이라 내일 다시 봅니다.':'정답을 맞혀 복습 간격이 늘어났습니다.'):'오답이라 내일 다시 봅니다.';
-  result.append(el('p','timing-feedback',`${timing} · ${interpretation}`));
+  const timingFeedback=el('p','timing-feedback',`${timing} · ${interpretation}`);
   const row=el('div','result-row');
   for(const source of answered.official_sources || []){
     const link=el('a','',`${source.label} ↗`);link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);
   }
-  const explain=el('button','secondary','AI 비교 해설 요청');explain.onclick=async()=>{explain.disabled=true;explain.textContent='해설 생성 중…';
+  const explanationSlot=el('div','explanation-slot');explanationSlot.setAttribute('aria-live','polite');
+  const explain=el('button','secondary','AI 비교 해설 요청');explain.onclick=async()=>{const requestedAtY=window.scrollY;explain.disabled=true;explain.textContent='해설 생성 중…';
     try{const value=await api('/api/explain',{id:current.id,selected:[...selected],attempt_id:answered.attempt_id});
-      result.querySelector('.explanation')?.remove();const content=el('div','explanation');content.append(renderMarkdown(value.body));
+      const content=el('div','explanation');content.append(renderMarkdown(value.body));
       if(value.note_relative){const saved=el('p','saved-review'), link=el('a','', 'Obsidian에서 오답 노트 열기');
         link.href=`obsidian://open?path=${encodeURIComponent(value.note_path)}`;
         saved.append('저장됨 · ',link,el('span','',` ${value.note_relative}`));content.append(saved);}
-      result.append(content);
-    }catch(error){result.querySelector('.explanation')?.remove();result.append(el('div','explanation',error.message));}
+      explanationSlot.replaceChildren(content);
+      if(currentView==='practice' && Math.abs(window.scrollY-requestedAtY)<80 && document.activeElement!==textarea)
+        summary.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+    }catch(error){explanationSlot.replaceChildren(el('div','explanation',error.message));}
     finally{explain.disabled=false;explain.textContent='AI 비교 해설 다시 보기';}};
-  row.append(explain);result.append(row);
+  row.append(explain);result.append(row,explanationSlot,timingFeedback);
   const box=el('div','note-box'), label=el('label','', '내가 헷갈린 이유를 Obsidian에 남기기'), textarea=el('textarea');textarea.placeholder='예: CloudTrail과 CloudWatch의 역할을 반대로 기억했다.';
   const save=el('button','secondary','개념 노트에 저장');const msg=el('span','notice');
   save.onclick=async()=>{try{const r=await api('/api/save-note',{id:current.id,reason:textarea.value});msg.textContent=`저장됨: ${r.path}`;textarea.value='';}catch(error){msg.textContent=error.message;}};
