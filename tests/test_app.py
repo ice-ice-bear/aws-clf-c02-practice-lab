@@ -8,6 +8,37 @@ import app
 
 
 class StudyFlowTest(unittest.TestCase):
+    def test_reader_keeps_full_notes_but_ai_context_excludes_personal_content(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(app, "VAULT", Path(temp)):
+            path = app.VAULT / "Concepts" / "iam.md"
+            path.parent.mkdir()
+            original = "---\ntags: [personal]\n---\n\n# IAM\n\n## 이해\n" + "학습 본문 " * 1000 + "\n## 근거와 더 읽기\n[공식 자료](https://aws.amazon.com/)\n## 내 오답\n내 개인 메모"
+            path.write_text(original, encoding="utf-8")
+            note = next(item for item in app.study_concepts() if item["id"] == "iam")
+            self.assertGreater(len(note["body"]), 5000)
+            self.assertIn("내 개인 메모", note["body"])
+            self.assertIn("[공식 자료]", note["body"])
+            self.assertNotIn("tags:", note["body"])
+            context = app.concept_context("iam")
+            self.assertLessEqual(len(context), 5000)
+            self.assertNotIn("내 개인 메모", context)
+            self.assertNotIn("[공식 자료]", context)
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_reference_files_are_limited_to_local_pdfs(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(app, "VAULT", Path(temp) / "vault"):
+            references = app.VAULT / "References"
+            references.mkdir(parents=True)
+            pdf = references / "book.pdf"
+            pdf.write_bytes(b"%PDF-1.4")
+            outside = Path(temp) / "outside.pdf"
+            outside.write_bytes(b"private")
+            (references / "alias.pdf").symlink_to(outside)
+            self.assertEqual(app.reference_file("book.pdf"), pdf.resolve())
+            for name in ("", "../outside.pdf", str(outside), "alias.pdf", "missing.pdf", "book.txt", "folder\\book.pdf"):
+                with self.subTest(name=name), self.assertRaises(FileNotFoundError):
+                    app.reference_file(name)
+
     def test_selected_concept_and_explanation_questions_save_to_obsidian(self):
         with tempfile.TemporaryDirectory() as temp:
             app.DB_PATH = Path(temp) / "study.sqlite3"
@@ -17,7 +48,7 @@ class StudyFlowTest(unittest.TestCase):
             concepts = app.study_concepts()
             iam = next(item for item in concepts if item["id"] == "iam")
             self.assertIn("최소 권한", iam["body"])
-            self.assertNotIn("내 오답", iam["body"])
+            self.assertIn("내 오답", iam["body"])
             self.assertNotIn("tags:", iam["body"])
             with patch.object(app, "request_study_answer", return_value={"body": "### 핵심\n역할을 사용합니다.", "model": app.MODEL}) as request:
                 app.ask_concept("iam", "역할은 임시 자격 증명", "액세스 키와 다른 점은?")
@@ -119,7 +150,8 @@ class StudyFlowTest(unittest.TestCase):
             saved = app.save_note("E01-Q04", "탄력성과 복원력을 혼동했다")
             self.assertIn("탄력성과 복원력을 혼동했다", Path(saved["path"]).read_text())
             context = app.concept_context("resilience-scaling")
-            self.assertIn("## 자주 틀리는 지점", context)
+            self.assertIn("RTO", context)
+            self.assertIn("RPO", context)
             self.assertNotIn("탄력성과 복원력을 혼동했다", context)
             self.assertNotIn("## 근거와 더 읽기", context)
 

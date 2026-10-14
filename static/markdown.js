@@ -5,11 +5,24 @@ function markdownElement(tag, className, text) {
   return node;
 }
 
-function renderInlineMarkdown(parent, text) {
-  const pieces = text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g);
+function renderInlineMarkdown(parent, text, resolveWikiLink) {
+  // shortcut: links use flat labels, extend the parser if nested Markdown labels are needed.
+  const pieces = text.split(/(\[\[[^\]\n]+\]\]|\[[^\]\n]+\]\([^\s)]+\)|\*\*[^*\n]+\*\*|`[^`\n]+`)/g);
   for (const piece of pieces) {
     if (!piece) continue;
-    if (piece.startsWith('**') && piece.endsWith('**')) {
+    const wiki = piece.match(/^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/);
+    const link = piece.match(/^\[([^\]]+)\]\(([^\s)]+)\)$/);
+    if (wiki || link) {
+      const label = wiki ? wiki[2] || wiki[1] : link[1];
+      const href = wiki ? resolveWikiLink?.(wiki[1]) : link[2];
+      let allowed = false;
+      try { allowed = ['https:', 'http:', ...(wiki ? ['obsidian:'] : [])].includes(new URL(href, 'http://localhost').protocol) && Boolean(href); } catch {}
+      if (allowed) {
+        const anchor = markdownElement('a', '', label);
+        anchor.setAttribute('href', href);anchor.setAttribute('target', '_blank');anchor.setAttribute('rel', 'noopener noreferrer');
+        parent.append(anchor);
+      } else parent.append(document.createTextNode(label));
+    } else if (piece.startsWith('**') && piece.endsWith('**')) {
       parent.append(markdownElement('strong', '', piece.slice(2, -2)));
     } else if (piece.startsWith('`') && piece.endsWith('`')) {
       parent.append(markdownElement('code', '', piece.slice(1, -1)));
@@ -51,7 +64,7 @@ function tableAlignment(line) {
   return cells.map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : 'left');
 }
 
-function appendTable(container, lines, start) {
+function appendTable(container, lines, start, resolveWikiLink) {
   const headings = tableCells(lines[start]);
   const alignments = tableAlignment(lines[start + 1]);
   if (!alignments || headings.length !== alignments.length) return 0;
@@ -63,7 +76,7 @@ function appendTable(container, lines, start) {
   headings.forEach((heading, index) => {
     const cell = markdownElement('th');
     cell.setAttribute('data-align', alignments[index]);
-    renderInlineMarkdown(cell, heading);
+    renderInlineMarkdown(cell, heading, resolveWikiLink);
     headRow.append(cell);
   });
   head.append(headRow);
@@ -77,7 +90,7 @@ function appendTable(container, lines, start) {
     values.forEach((value, index) => {
       const cell = markdownElement('td');
       cell.setAttribute('data-align', alignments[index]);
-      renderInlineMarkdown(cell, value);
+      renderInlineMarkdown(cell, value, resolveWikiLink);
       row.append(cell);
     });
     body.append(row);
@@ -90,7 +103,7 @@ function appendTable(container, lines, start) {
   return cursor - start;
 }
 
-function renderMarkdown(body) {
+function renderMarkdown(body, {headingOffset, resolveWikiLink} = {}) {
   const container = markdownElement('div', 'explanation-body');
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
   let paragraph = [];
@@ -100,7 +113,7 @@ function renderMarkdown(body) {
   const flush = () => {
     if (!paragraph.length) return;
     const node = markdownElement('p');
-    renderInlineMarkdown(node, paragraph.join(' '));
+    renderInlineMarkdown(node, paragraph.join(' '), resolveWikiLink);
     container.append(node);
     paragraph = [];
   };
@@ -121,17 +134,17 @@ function renderMarkdown(body) {
       if (alignments && headings.length === alignments.length) {
         flush();
         resetList();
-        index += appendTable(container, lines, index);
+        index += appendTable(container, lines, index, resolveWikiLink);
         continue;
       }
     }
 
-    const heading = line.match(/^#{1,4}\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
       flush();
       resetList();
-      const node = markdownElement('h4');
-      renderInlineMarkdown(node, heading[1]);
+      const node = markdownElement(`h${headingOffset === undefined ? 4 : Math.min(6, heading[1].length + headingOffset)}`);
+      renderInlineMarkdown(node, heading[2], resolveWikiLink);
       container.append(node);
       index += 1;
       continue;
@@ -148,7 +161,7 @@ function renderMarkdown(body) {
         container.append(list);
       }
       const item = markdownElement('li');
-      renderInlineMarkdown(item, (bullet || ordered)[1]);
+      renderInlineMarkdown(item, (bullet || ordered)[1], resolveWikiLink);
       list.append(item);
       index += 1;
       continue;

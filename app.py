@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 from concepts import BY_ID, CONCEPTS, as_dict, classify
 from knowledge import render_note
 from review_notes import init_review_map, save_ai_review, save_study_qa, verified_sources
+from session_report import build_session_report
 
 ROOT = Path(__file__).resolve().parent
 
@@ -278,7 +279,10 @@ def session_details(session_id=None):
             session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
         if not session:
             return None
-        items = db.execute("""SELECT si.*, a.correct FROM session_items si
+        items = db.execute("""SELECT si.*, a.correct, a.selected, a.confidence, a.duration_seconds,
+                                     q.concept_id, q.exam, q.number, q.stem,
+                                     q.correct AS correct_answers, q.needs_review
+                              FROM session_items si JOIN questions q ON q.id=si.question_id
                               LEFT JOIN attempts a ON a.id=si.attempt_id
                               WHERE si.session_id=? ORDER BY si.position""", (session["id"],)).fetchall()
         cursor = session["cursor"]
@@ -293,7 +297,9 @@ def session_details(session_id=None):
         return {"id": session["id"], "kind": session["kind"], "exam": session["exam"],
                 "total": len(items), "position": cursor + 1 if question else len(items),
                 "answered": answered, "correct": correct, "skipped": cursor - answered if question else len(items) - answered,
-                "complete": question is None, "question": question_dict(question) if question else None}
+                "complete": question is None, "question": question_dict(question) if question else None,
+                "report": build_session_report([{**dict(item), "stem": display_text(item["stem"])} for item in items],
+                                               DOMAIN_WEIGHTS, EXAM_PACE_SECONDS) if question is None else None}
 
 
 def recent_sessions():
@@ -469,11 +475,20 @@ def study_concepts():
     concepts = []
     for item in CONCEPTS:
         concept = as_dict(item)
-        body = concept_context(concept["id"])
+        path = VAULT / "Concepts" / f"{concept['id']}.md"
+        body = path.read_text(encoding="utf-8") if path.is_file() else concept["summary"]
         body = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", body, flags=re.S)
         body = re.sub(r"\A#\s+[^\n]+\n", "", body).strip()
         concepts.append({**concept, "body": body})
     return concepts
+
+
+def reference_file(name):
+    root = (VAULT / "References").resolve()
+    path = (root / name).resolve()
+    if not name or "/" in name or "\\" in name or path.parent != root or path.suffix.lower() != ".pdf" or not path.is_file():
+        raise FileNotFoundError("학습서 PDF를 찾을 수 없습니다")
+    return path
 
 
 def request_study_answer(prompt):
@@ -685,6 +700,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond({"concepts": [as_dict(c) for c in CONCEPTS]})
         if parsed.path == "/api/study-concepts":
             return self.respond({"concepts": study_concepts()})
+        if parsed.path == "/api/reference":
+            try:
+                content = reference_file(args.get("name", [""])[0]).read_bytes()
+            except (FileNotFoundError, OSError, ValueError):
+                return self.send_error(404, "Reference PDF not found")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
         file = "index.html" if parsed.path == "/" else parsed.path.removeprefix("/")
         if file not in ("index.html", "app.js", "markdown.js", "style.css", "favicon.svg"):
             self.send_error(404)

@@ -1,3 +1,4 @@
+import json
 import subprocess
 import textwrap
 import unittest
@@ -47,6 +48,13 @@ class MarkdownRendererTest(unittest.TestCase):
               boldCell: table.children[1].children[0].children[0].children[0].tagName,
               paragraph: text(root.children[2]),
             }};
+            const linked = renderMarkdown('## 출처\\n\\n[공식 문서](https://docs.aws.amazon.com/) [금지](javascript:alert) [[book.pdf#page=71|학습서]]\\n\\n### 상세', {{
+              headingOffset: 1, resolveWikiLink: () => '/api/reference?name=book.pdf#page=71',
+            }});
+            result.levels = [linked.children[0].tagName, linked.children[2].tagName];
+            result.links = linked.children[1].children.filter(node => node.tagName === 'a').map(node => node.attributes.href);
+            const unsafe = renderMarkdown('[[outside|unsafe]]', {{resolveWikiLink: () => 'javascript:alert'}});
+            result.unsafeLinks = unsafe.children[0].children.filter(node => node.tagName === 'a').length;
             process.stdout.write(JSON.stringify(result));
             """
         )
@@ -55,10 +63,11 @@ class MarkdownRendererTest(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(
-            completed.stdout,
-            '{"heading":"h4","wrapperClass":"markdown-table-wrap","table":"table",'
-            '"headCells":["서비스","용도"],"bodyRows":2,"boldCell":"strong",'
-            '"paragraph":"표 다음 문단입니다."}',
+            json.loads(completed.stdout),
+            {"heading": "h4", "wrapperClass": "markdown-table-wrap", "table": "table",
+             "headCells": ["서비스", "용도"], "bodyRows": 2, "boldCell": "strong",
+             "paragraph": "표 다음 문단입니다.", "levels": ["h3", "h4"],
+             "links": ["https://docs.aws.amazon.com/", "/api/reference?name=book.pdf#page=71"], "unsafeLinks": 0},
         )
 
 

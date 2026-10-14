@@ -5,7 +5,7 @@ let session = null, adHoc = false, setupOpen = false;
 let concepts = [], activeConcept = null, qaContext = null, qaResponse = null, currentAiExplanation = '';
 
 function pauseTimer() { if(startedAt!==null){elapsedMs+=performance.now()-startedAt;startedAt=null;} }
-function resumeTimer() { if(current && !answered && currentView==='practice' && !document.hidden && startedAt===null) startedAt=performance.now(); }
+function resumeTimer() { if(current && !answered && currentView==='practice' && !document.hidden && !$('question-concept-dialog').open && startedAt===null) startedAt=performance.now(); }
 function answerSeconds() { pauseTimer(); return Math.min(1800,Math.max(1,Math.round(elapsedMs/1000))); }
 function formatTime(seconds) { const n=Math.round(seconds); return n<60?`${n}초`:`${Math.floor(n/60)}분 ${String(n%60).padStart(2,'0')}초`; }
 async function api(path, body) {
@@ -19,41 +19,110 @@ function el(tag, className, text) { const node=document.createElement(tag); if(c
 function setView(view) {
   pauseTimer();
   currentView=view;
+  document.body.classList.toggle('reading',view==='concepts');
   for (const name of ['practice','concepts','review','guide']) $(name+'-view').classList.toggle('hidden',name!==view);
   document.querySelectorAll('.nav').forEach(button=>button.classList.toggle('active',button.dataset.view===view));
   $('page-title').textContent={practice:'오늘의 연습',concepts:'개념 학습',review:'취약 개념',guide:'학습 안내'}[view];
   if(view==='review') refreshStats();
+  if(view==='concepts') updateConceptLocation();
+  if(view==='concepts' && activeConcept)history.replaceState(null,'',`#concept=${encodeURIComponent(activeConcept.id)}`);
+  else if(view!=='concepts' && location.hash.startsWith('#concept='))history.replaceState(null,'',location.pathname+location.search);
   $('ask-selection').classList.add('hidden');
   resumeTimer();
 }
+function resolveStudyLink(target) {
+  if(target.startsWith('/') || target.includes('\\') || target.split('/').includes('..'))return null;
+  const pdf=target.match(/^([^/#]+\.pdf)(?:#page=(\d+))?$/i);
+  if(pdf)return `/api/reference?name=${encodeURIComponent(pdf[1])}${pdf[2]?`#page=${pdf[2]}`:''}`;
+  return `obsidian://open?path=${encodeURIComponent(`${studyVault}/${target.endsWith('.md')?target:target+'.md'}`)}`;
+}
+function openQuestionConcept() {
+  if(!current)return;
+  const concept=concepts.find(item=>item.id===current.concept.id) || current.concept;
+  $('question-concept-title').textContent=concept.title;
+  $('question-concept-body').replaceChildren(renderMarkdown((concept.body || concept.summary).split('## 내 오답',1)[0],{headingOffset:1,resolveWikiLink:resolveStudyLink}));
+  pauseTimer();
+  $('question-concept-dialog').showModal();
+  $('question-concept-dialog').scrollTop=0;
+}
 function renderConcept(concept) {
   activeConcept=concept;qaContext=null;$('ask-selection').classList.add('hidden');
-  $('concept-picker').value=concept.id;
-  document.querySelectorAll('.concept-item').forEach(button=>button.classList.toggle('active',button.dataset.id===concept.id));
   const reader=$('concept-reader');reader.replaceChildren();
   const heading=el('header','concept-heading');
   const title=el('div');title.append(el('span','badge',concept.domain),el('h2','',concept.title));
   const open=el('a','secondary concept-open','Obsidian에서 열기');
   open.href=`obsidian://open?path=${encodeURIComponent(`${studyVault}/Concepts/${concept.id}.md`)}`;
   heading.append(title,open);reader.append(heading);
-  const body=el('div','concept-body');body.append(renderMarkdown(concept.body));reader.append(body);
+  const body=el('div','concept-body');
+  const markdown=renderMarkdown(concept.body,{headingOffset:1,resolveWikiLink:resolveStudyLink});
+  let section=null, index=0, privateContent=false;
+  for(const node of [...markdown.children]){
+    if(/^H[2-6]$/.test(node.tagName)){
+      section=el('section','concept-section');node.id=`concept-section-${index++}`;
+      if(['근거와 더 읽기','내 오답'].includes(node.textContent.trim()))privateContent=true;
+      if(privateContent)section.dataset.aiExcluded='true';
+      if(node.textContent.trim()==='한 줄 구별법')section.classList.add('concept-summary');
+      if(node.textContent.trim()==='자주 틀리는 지점')section.classList.add('concept-trap');
+      if(node.textContent.trim()==='내 오답')section.classList.add('concept-mistakes');
+      body.append(section);
+    }
+    (section || body).append(node);
+  }
+  for(const empty of body.querySelectorAll('.concept-mistakes')){
+    if(empty.children.length===1)empty.append(el('p','notice','아직 이 개념에 남긴 오답 메모가 없습니다.'));
+  }
+  reader.append(body);reader.insertBefore(conceptSectionLinks('concept-page-toc'),body);
+  renderConceptCatalog();
+  if(currentView==='concepts')history.replaceState(null,'',`#concept=${encodeURIComponent(concept.id)}`);
+  updateConceptLocation();
+}
+function conceptSectionLinks(className) {
+  const nav=el('nav',className);nav.setAttribute('aria-label','이 개념의 목차');
+  for(const heading of document.querySelectorAll('.concept-body [id^="concept-section-"]')){
+    const link=el('a','',heading.textContent);link.href=`#${heading.id}`;link.dataset.section=heading.id;
+    link.onclick=event=>{event.preventDefault();heading.scrollIntoView({block:'start'});updateConceptLocation();};
+    nav.append(link);
+  }
+  return nav;
+}
+function updateConceptLocation() {
+  if(currentView!=='concepts')return;
+  const headings=[...document.querySelectorAll('.concept-body [id^="concept-section-"]')];
+  const atEnd=scrollY>0 && scrollY+innerHeight>=document.documentElement.scrollHeight-2;
+  const current=atEnd?headings.at(-1):headings.filter(heading=>heading.getBoundingClientRect().top<=160).at(-1) || headings[0];
+  for(const link of document.querySelectorAll('[data-section]')){
+    if(link.dataset.section===current?.id)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');
+  }
 }
 let studyVault = '';
-async function initConcepts() {
-  const value=await api('/api/study-concepts');concepts=value.concepts;
+function renderConceptCatalog() {
   const list=$('concept-list'),picker=$('concept-picker');list.replaceChildren();picker.replaceChildren();
-  for(const domain of [...new Set(concepts.map(item=>item.domain))]){
+  const query=$('concept-search').value.trim().toLocaleLowerCase();
+  const matches=concepts.filter(item=>`${item.title} ${item.domain} ${item.body}`.toLocaleLowerCase().includes(query));
+  $('concept-search-status').textContent=matches.length?`${matches.length} / ${concepts.length}개 개념`:'검색 결과가 없습니다';
+  if(!matches.length)list.append(el('p','concept-empty','검색 결과가 없습니다. 다른 단어로 찾아보세요.'));
+  for(const domain of [...new Set(matches.map(item=>item.domain))]){
     const group=el('div','concept-group');group.append(el('h3','',domain));
     const optionGroup=el('optgroup');optionGroup.label=domain;
-    for(const concept of concepts.filter(item=>item.domain===domain)){
+    for(const concept of matches.filter(item=>item.domain===domain)){
       const button=el('button','concept-item',concept.title);button.type='button';button.dataset.id=concept.id;
-      button.onclick=()=>renderConcept(concept);group.append(button);
+      button.onclick=()=>{renderConcept(concept);$('concept-reader').scrollIntoView({block:'start'});};group.append(button);
+      if(concept.id===activeConcept?.id){button.classList.add('active');button.setAttribute('aria-current','page');group.append(conceptSectionLinks('concept-section-links'));}
       const option=el('option','',concept.title);option.value=concept.id;optionGroup.append(option);
     }
     list.append(group);picker.append(optionGroup);
   }
-  picker.onchange=()=>renderConcept(concepts.find(item=>item.id===picker.value));
-  if(concepts.length)renderConcept(concepts[0]);
+  picker.disabled=!matches.length;
+  picker.value=activeConcept?.id || '';
+  updateConceptLocation();
+}
+async function initConcepts() {
+  const value=await api('/api/study-concepts');concepts=value.concepts;
+  $('concept-picker').onchange=()=>{renderConcept(concepts.find(item=>item.id===$('concept-picker').value));$('concept-reader').scrollIntoView({block:'start'});};
+  $('concept-search').oninput=renderConceptCatalog;
+  const saved=new URLSearchParams(location.hash.slice(1)).get('concept');
+  if(concepts.some(item=>item.id===saved))setView('concepts');
+  if(concepts.length)renderConcept(concepts.find(item=>item.id===saved) || concepts[0]);
 }
 async function refreshStats() {
   const s=await api('/api/stats');
@@ -77,7 +146,8 @@ async function refreshStats() {
   if(!s.weak.length){list.append(el('div','empty-review','아직 취약 개념이 없습니다. 오답이나 오래 걸린 정답이 쌓이면 여기에 나타납니다.'));return;}
   for(const concept of s.weak){
     const item=el('article','weak-item'), left=el('div'), title=el('h3','',concept.title), desc=el('p','',concept.summary);
-    const link=el('a','', 'Obsidian 개념 노트 열기 ↗');link.href=`obsidian://open?path=${encodeURIComponent(`${s.vault}/Concepts/${concept.id}.md`)}`;
+    const link=el('a','', '개념 읽기');link.href=`#concept=${encodeURIComponent(concept.id)}`;
+    link.onclick=event=>{event.preventDefault();$('concept-search').value='';renderConcept(concepts.find(item=>item.id===concept.id));setView('concepts');$('concept-reader').scrollIntoView({block:'start'});};
     left.append(title,desc,link); const count=el('div','weak-count',`${concept.weak}회 다시 보기`);count.append(el('small','',`총 ${concept.attempts}회 풀이`));item.append(left,count);list.append(item);
   }
 }
@@ -86,17 +156,21 @@ function renderQuestion() {
   $('ask-selection').classList.add('hidden');qaContext=null;
   renderSessionChrome();
   $('next-dock').classList.toggle('hidden',!answered || !current);
-  $('next-answer').textContent=adHoc?'세트로 돌아가기':session?.position===session?.total?'결과 보기':'다음 문제';
+  $('next-answer').textContent=adHoc?(session?.complete?'결과로 돌아가기':'세트로 돌아가기'):session?.position===session?.total?'결과 보기':'다음 문제';
   if(!current){
     if(session?.complete){
-      const done=el('div','session-complete');done.append(el('span','badge','세트 완료'),el('h3','',`${session.total}문항을 마쳤습니다`),
-        el('p','',`정답 ${session.correct}문항 · 오답 ${session.answered-session.correct}문항 · 건너뜀 ${session.skipped}문항. 오답과 풀이 시간은 취약 개념에 반영되었습니다.`));
-      const action=el('button','primary','새 세트 고르기');action.onclick=()=>{setupOpen=true;renderSessionChrome();refreshSessionList();$('session-setup').scrollIntoView({block:'start'});};done.append(action);card.append(done);
+      card.append(renderSessionReport(session));
     }else card.append(el('div','loading','풀이 방식을 선택해 세트를 시작하세요.'));
     return;
   }
   const top=el('div','question-top'), badge=el('span','badge',current.concept.title), no=el('span','question-no',`EXAM ${String(current.exam).padStart(2,'0')} / Q${String(current.number).padStart(2,'0')}`);
-  top.append(badge,no);card.append(top);
+  const related=el('div','question-concept'), help=el('button','concept-help','?');
+  help.type='button';help.title='관련 개념 보기';help.setAttribute('aria-label',`${current.concept.title} 관련 개념 보기`);
+  help.setAttribute('aria-haspopup','dialog');help.setAttribute('aria-controls','question-concept-dialog');help.onclick=openQuestionConcept;
+  related.append(badge,help);top.append(related,no);card.append(top);
+  if(adHoc && session?.complete){
+    const back=el('button','secondary','세트 결과로 돌아가기');back.onclick=()=>loadSession(session.id,true);card.append(back);
+  }
   if(current.needs_review){card.append(el('span','badge warn','현재 AWS 공식 자료 재확인 권장'));}
   card.append(el('h3','question-text',current.stem));
   const options=el('div','option-list');
@@ -131,7 +205,7 @@ function renderQuestion() {
     choice.append(el('span','answer-letter',letter),el('strong','',current.options[letter] || letter));
     correctChoices.append(choice);
   }
-  summary.append(correctChoices,el('p','answer-description',answered.offline_explanation));result.append(summary);
+  summary.append(correctChoices,el('p','answer-description',`관련 개념 요약: ${answered.offline_explanation}`));result.append(summary);
   const timing=answered.duration_seconds===null?'풀이 시간 미기록':`풀이 ${formatTime(answered.duration_seconds)} · 이 문제 평균 ${formatTime(answered.question_stats.avg_seconds)} (${answered.question_stats.attempts}회) · 내 전체 평균 ${formatTime(answered.personal_average_seconds)} · 느린 기준 ${formatTime(answered.time_threshold_seconds)}`;
   const interpretation=answered.is_correct?(answered.confused?'반복 오답과 평균 풀이 시간이 높아 내일 다시 봅니다.':answered.slow?'오래 걸린 정답이라 내일 다시 봅니다.':'정답을 맞혀 복습 간격이 늘어났습니다.'):'오답이라 내일 다시 봅니다.';
   const timingFeedback=el('p','timing-feedback',`${timing} · ${interpretation}`);
@@ -160,6 +234,106 @@ function renderQuestion() {
   save.onclick=async()=>{try{const r=await api('/api/save-note',{id:current.id,reason:textarea.value});msg.textContent=`저장됨: ${r.path}`;textarea.value='';}catch(error){msg.textContent=error.message;}};
   box.append(label,textarea,save,msg);result.append(box);
   card.append(result);
+}
+function reportConceptLink(concept) {
+  const link=el('a','', '개념 읽기');link.href=`#concept=${encodeURIComponent(concept.id)}`;
+  link.onclick=async event=>{
+    event.preventDefault();
+    try{
+      if(!concepts.length)await initConcepts();
+      const note=concepts.find(item=>item.id===concept.id);
+      if(!note)throw new Error('개념 자료를 찾을 수 없습니다. 새로고침해 주세요.');
+      $('concept-search').value='';renderConcept(note);setView('concepts');$('concept-reader').scrollIntoView({block:'start'});
+    }catch(error){alert(error.message);}
+  };
+  return link;
+}
+function reportTable(headers, rows, caption) {
+  const wrap=el('div','report-table-wrap'),table=el('table','report-table');
+  table.append(el('caption','',caption));
+  const head=el('thead'),tr=el('tr');
+  for(const label of headers){const th=el('th','',label);th.scope='col';tr.append(th);}
+  head.append(tr);table.append(head);
+  const body=el('tbody');
+  for(const values of rows){
+    const row=el('tr');
+    values.forEach((value,index)=>{const cell=el(index?'td':'th');if(!index)cell.scope='row';
+      if(typeof value==='string')cell.textContent=value;else cell.append(value);row.append(cell);});
+    body.append(row);
+  }
+  table.append(body);wrap.append(table);return wrap;
+}
+function renderSessionReport(value) {
+  const done=el('section','session-report'),header=el('header','report-header'),title=el('div');
+  title.append(el('span','badge','세트 완료'),el('h3','',`${value.total}문항 학습 결과`));
+  const action=el('button','primary','새 세트 고르기');
+  action.onclick=()=>{setupOpen=true;renderSessionChrome();refreshSessionList().catch(console.error);$('session-setup').scrollIntoView({block:'start'});};
+  header.append(title,action);done.append(header);
+  const r=value.report;
+  if(!r){done.append(el('p','notice','상세 결과를 불러오려면 앱 서버를 재시작한 뒤 새로고침하세요.'));return done;}
+  const percent=n=>n===null?'—':`${n.toFixed(1)}%`;
+  const overview=el('div','report-overview'),score=el('div','report-score');
+  score.append(el('span','','연습 점수'),el('strong','',r.score_percent===null?'—':r.score_percent.toFixed(1)),el('small','','/ 100점'));
+  const metrics=el('dl','report-metrics');
+  for(const [label,text] of [['정답',`${r.correct} / ${r.total}문항`],['오답',`${r.wrong}문항`],['오답률',percent(r.wrong_percent)],['건너뜀',`${r.skipped}문항`]]){
+    const item=el('div');item.append(el('dt','',label),el('dd','',text));metrics.append(item);
+  }
+  overview.append(score,metrics);done.append(overview);
+  const scoreNote=el('p','notice','전체 문항 기준 정답 점수이며 건너뜀은 0점입니다. 오답률은 제출한 답안 기준입니다. 실제 AWS 시험의 환산 점수·합격 판정과 다릅니다. ');
+  const guide=el('a','','AWS 채점 안내');guide.href='https://docs.aws.amazon.com/aws-certification/latest/cloud-practitioner-02/cloud-practitioner-02.html';guide.target='_blank';guide.rel='noopener noreferrer';scoreNote.append(guide);done.append(scoreNote);
+  done.append(el('p','report-timing',r.timed_answers?
+    `기록된 풀이 시간 ${formatTime(r.total_seconds)} · 평균 ${formatTime(r.average_seconds)} · 시간 기록 ${r.timed_answers}/${r.answered}문항 · 느린 정답 ${r.slow_correct}문항`:
+    '이 세트에는 시간 기록이 없습니다. 점수·오답 분석은 그대로 확인할 수 있습니다.'));
+  done.append(el('p','notice',`느린 정답 기준은 문항당 ${formatTime(r.slow_threshold_seconds)}입니다. 시간 합계는 제출한 답안의 활동 시간이며 개념 읽기·휴식·건너뜀 시간은 포함하지 않습니다.`));
+  done.append(reportTable(['시험 영역','출제','정답','오답 / 건너뜀','정답률','오답률'],r.domains.map(d=>[
+    `${d.domain} (시험 비중 ${d.weight}%)`,`${d.total}문항`,`${d.correct}문항`,`${d.wrong} / ${d.skipped}문항`,percent(d.score_percent),percent(d.wrong_percent)]),'영역별 결과'));
+  const missedDomains=r.domains.filter(d=>d.wrong+d.skipped);
+  if(missedDomains.length){
+    const lowest=[...missedDomains].sort((a,b)=>a.score_percent-b.score_percent)[0];
+    const largest=[...missedDomains].sort((a,b)=>(b.wrong+b.skipped)-(a.wrong+a.skipped))[0];
+    done.append(el('p','report-domain-summary',`영역 진단: ${lowest.domain}의 정답률이 ${percent(lowest.score_percent)} (${lowest.correct}/${lowest.total}문항)로 가장 낮습니다. 놓친 문항은 ${largest.domain}에서 ${largest.wrong+largest.skipped}개로 가장 많습니다. 아래 개념별 결과를 통해 복습할 내용을 좁혀 보세요.`));
+  }
+  const priorities=r.concepts.filter(c=>c.review_count),coaching=el('section','report-coaching');
+  coaching.append(el('h4','','다음 학습에서 먼저 보강할 개념'));
+  coaching.append(el('p','notice','오답·건너뜀 수 → 오답률 → 복습 대상 문항 수 순서입니다. 적은 문항의 결과는 참고용이며, 개념·영역은 자동 분류 기준입니다.'));
+  if(priorities.length){
+    priorities.slice(0,3).forEach((c,index)=>{
+      const item=el('article','report-priority');
+      item.append(el('h5','',`${index+1}. ${c.title}`),el('p','report-evidence',
+        `${c.total}문항 중 오답 ${c.wrong} · 건너뜀 ${c.skipped} · 정답률 ${percent(c.score_percent)} · 오답률 ${percent(c.wrong_percent)} · 느린 정답 ${c.slow_correct}`),el('p','',c.focus));
+      const steps=el('p','',c.wrong+c.skipped?
+        '오늘: 개념의 비교표를 읽고 아래 오답에서 내 선택과 정답의 차이를 한 문장으로 적으세요. 내일: 해당 문제를 자료 없이 다시 풀고 선택 이유를 설명하세요.':
+        '정답 선택의 근거와 나머지 보기의 제외 이유를 설명한 뒤, 자료 없이 다시 풀어 시간과 이해도를 확인하세요.');
+      item.append(steps);
+      const actions=el('div','report-actions'),retry=el('button','secondary','관련 문제 다시 풀기');
+      retry.onclick=()=>{setView('practice');loadQuestion(c.question_ids[0]);};actions.append(reportConceptLink(c),retry);item.append(actions);coaching.append(item);
+    });
+    coaching.append(el('p','notice',`복습 대상 ${r.review_count}문항입니다. 우선 위 ${Math.min(3,priorities.length)}개 개념부터 확인하고, 아래 목록에서 나머지를 복습하세요. 재풀이 기록은 추가되며 이 세트 점수는 유지됩니다.`));
+  }else coaching.append(el('p','','이번 세트에서 오답·건너뜀·복습 대상 정답이 없습니다. 다음에는 아직 풀지 않은 문제로 새 세트를 풀어 같은 개념을 다른 사례에서도 구별하는지 확인하세요.'));
+  done.append(coaching);
+  const conceptDetails=el('details','report-details');
+  conceptDetails.append(el('summary','',`전체 ${r.concepts.length}개 개념별 성적 보기`));
+  conceptDetails.append(reportTable(['개념','출제','정답률','오답률','오답 / 건너뜀','느린 정답','평균 시간'],r.concepts.map(c=>{
+    const label=el('div');label.append(el('strong','',c.title),reportConceptLink(c));
+    return [label,`${c.total}`,percent(c.score_percent),percent(c.wrong_percent),`${c.wrong} / ${c.skipped}`,`${c.slow_correct}`,c.average_seconds===null?'기록 없음':formatTime(c.average_seconds)];
+  }),'개념별 결과'));
+  done.append(conceptDetails);
+  const questions=el('section','report-questions');questions.append(el('h4','','문항별 복습'));
+  for(const [status,label] of [['wrong','오답'],['skipped','건너뛴 문제'],['correct','복습 대상 정답']]){
+    const list=r.review_questions.filter(q=>q.status===status);if(!list.length)continue;
+    const details=el('details','report-details');details.append(el('summary','',`${label} ${list.length}문항`));
+    for(const q of list){
+      const row=el('article','report-question'),info=el('div'),concept=r.concepts.find(c=>c.id===q.concept_id);
+      info.append(el('h5','',`${q.id} · ${concept.title}`),el('p','report-stem',q.stem),el('p','notice',
+        `내 선택 ${q.selected.join(', ') || '미제출'} · 정답 ${q.correct_answers.join(', ')} · ${q.duration_seconds===null?'시간 기록 없음':formatTime(q.duration_seconds)}${q.slow?' · 느린 풀이':''}${q.flagged?' · 기록상 복습 표시':''}`));
+      if(q.needs_review)info.append(el('span','badge warn','현재 AWS 공식 자료 재확인 권장'));
+      const actions=el('div','report-actions'),retry=el('button','secondary','다시 풀기');
+      retry.onclick=()=>{setView('practice');loadQuestion(q.id);};actions.append(reportConceptLink(concept),retry);row.append(info,actions);details.append(row);
+    }
+    questions.append(details);
+  }
+  if(!r.review_questions.length)questions.append(el('p','notice','다시 볼 문항이 없습니다.'));
+  done.append(questions);return done;
 }
 function sessionLabel(value) {
   if(value.kind==='exam')return `${value.exam}회차 모의고사`;
@@ -193,8 +367,8 @@ async function refreshSessionList() {
     const row=el('div','recent-session'), detail=el('div');
     detail.append(el('strong','',sessionLabel(previous)),
       el('span','',`${new Date(previous.created_at).toLocaleDateString('ko-KR')} · ${previous.answered}/${previous.total}문항 풀이${previous.complete?' · 완료':''}`));
-    const open=el('button','secondary',previous.id===session?.id?'현재 세트':'이어 풀기');
-    open.onclick=()=>loadSession(previous.id);
+    const open=el('button','secondary',previous.complete?'결과 보기':previous.id===session?.id?'현재 세트':'이어 풀기');
+    open.onclick=()=>loadSession(previous.id,previous.complete);
     row.append(detail,open);list.append(row);
   }
 }
@@ -203,9 +377,9 @@ function applySession(value, shouldScroll=false) {
   selected=new Set();answered=null;currentAiExplanation='';elapsedMs=0;startedAt=null;renderQuestion();resumeTimer();
   if(shouldScroll)$('question-card').scrollIntoView({block:'start',behavior:'auto'});
 }
-async function loadSession(sessionId=null) {
+async function loadSession(sessionId=null, reportOnly=false) {
   if(loading)return;loading=true;
-  try{const value=sessionId?await api('/api/session/activate',{id:sessionId}):await api('/api/session');
+  try{const value=sessionId?await api(reportOnly?`/api/session?id=${sessionId}`:'/api/session/activate',reportOnly?undefined:{id:sessionId}):await api('/api/session');
     applySession(value.session,Boolean(sessionId));
     if(setupOpen)await refreshSessionList();}
   catch(error){$('question-card').replaceChildren(el('div','loading',error.message));}
@@ -222,7 +396,7 @@ async function startSession() {
 }
 async function advanceQuestion() {
   if(loading)return;
-  if(adHoc){await loadSession();return;}
+  if(adHoc){await loadSession(session?.id,Boolean(session?.complete));return;}
   if(!session || !current)return;
   loading=true;pauseTimer();$('next-dock').classList.add('hidden');
   const questionId=current.id;
@@ -247,6 +421,7 @@ function captureStudySelection() {
   const text=selection.toString().trim();
   if(text.length<2){$('ask-selection').classList.add('hidden');return;}
   if(currentView==='concepts' && activeConcept && $('concept-reader').contains(target)){
+    if([...$('concept-reader').querySelectorAll('[data-ai-excluded]')].some(section=>range.intersectsNode(section))){qaContext=null;$('ask-selection').classList.add('hidden');return;}
     qaContext={kind:'concept',id:activeConcept.id,selection:text.slice(0,4000)};
     $('ask-selection').textContent='선택 문장 AI에게 질문';$('ask-selection').classList.remove('hidden');return;
   }
@@ -301,11 +476,13 @@ for(let i=1;i<=23;i++){const option=el('option','',`${i}회차`);option.value=i;
 document.querySelectorAll('.nav').forEach(button=>button.onclick=()=>setView(button.dataset.view));
 $('ask-selection').onclick=openStudyQuestion;$('qa-ask').onclick=askStudyQuestion;$('qa-save').onclick=saveStudyQuestion;
 document.addEventListener('selectionchange',captureStudySelection);
+document.addEventListener('scroll',updateConceptLocation,{passive:true});
 $('concept-qa-dialog').addEventListener('close',()=>{qaContext=null;$('ask-selection').classList.add('hidden');document.getSelection()?.removeAllRanges();});
+$('question-concept-dialog').addEventListener('close',resumeTimer);
 $('next').onclick=advanceQuestion;$('next-answer').onclick=advanceQuestion;
 $('session-kind').onchange=updateSetup;$('start-session').onclick=startSession;
 $('new-session').onclick=()=>{setupOpen=true;renderSessionChrome();refreshSessionList().catch(console.error);$('session-setup').scrollIntoView({block:'start'});};
 $('resume-session').onclick=()=>{setupOpen=false;renderSessionChrome();$('question-card').scrollIntoView({block:'start'});};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseTimer();else resumeTimer();});
-document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='n' && answered && currentView==='practice' && !event.repeat && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){event.preventDefault();advanceQuestion();}});
+document.addEventListener('keydown',event=>{if(event.key.toLowerCase()==='n' && answered && currentView==='practice' && !document.querySelector('dialog[open]') && !event.repeat && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){event.preventDefault();advanceQuestion();}});
 updateSetup();Promise.all([refreshStats().then(initConcepts),loadSession()]).catch(console.error);

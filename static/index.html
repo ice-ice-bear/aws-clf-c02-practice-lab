@@ -41,7 +41,8 @@
         <div id="next-dock" class="next-dock hidden"><span>정답을 확인했다면 계속 풀어보세요.</span><button id="next-answer" class="primary" type="button">다음 문제</button></div>
       </section>
       <section id="concepts-view" class="view hidden">
-        <div class="section-head"><div><span class="eyebrow">CONCEPT LIBRARY</span><h2>개념을 먼저 익혀보세요</h2></div><p>본문을 드래그하면 선택한 내용에 대해 AI에게 질문할 수 있습니다.</p></div>
+        <div class="section-head"><p>개념을 찾아 읽고, 헷갈리는 부분과 내 오답을 함께 확인하세요.</p></div>
+        <div class="concept-search"><label for="concept-search">학습자료 검색</label><input id="concept-search" type="search" placeholder="서비스 이름이나 궁금한 내용을 검색하세요" autocomplete="off"><span id="concept-search-status" role="status"></span></div>
         <div class="concept-layout">
           <aside class="concept-catalog" aria-label="개념 목차"><div id="concept-list"></div></aside>
           <label class="concept-mobile">개념 선택<select id="concept-picker"></select></label>
@@ -71,6 +72,11 @@
     <div class="qa-actions"><button id="qa-ask" class="primary" type="button">AI에게 질문</button><span id="qa-status" class="notice" role="status"></span></div>
     <div id="qa-answer" class="qa-answer hidden" aria-live="polite"></div>
     <div id="qa-save-row" class="qa-actions hidden"><button id="qa-save" class="secondary" type="button">질문과 답변을 Obsidian에 저장</button></div>
+  </dialog>
+  <dialog id="question-concept-dialog" class="concept-qa-dialog question-concept-dialog" aria-labelledby="question-concept-title" aria-describedby="question-concept-help">
+    <form method="dialog" class="dialog-head"><h2 id="question-concept-title">관련 개념</h2><button class="dialog-close" aria-label="닫고 문제로 돌아가기" autofocus>×</button></form>
+    <p id="question-concept-help" class="notice">개념 확인 중에는 풀이 시간이 멈춥니다. 닫으면 같은 문제로 돌아갑니다.</p>
+    <div id="question-concept-body" class="concept-body"></div>
   </dialog>
   <script src="/markdown.js"></script>
   <script src="/app.js"></script>
